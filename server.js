@@ -90,6 +90,40 @@ app.get('/av/:k', (req, res) => {
   res.type('jpeg').set('Cache-Control', 'public,max-age=86400').send(Buffer.from(u.avatar.split(',')[1], 'base64'));
 });
 
+// ICE servers for voice/video. STUN is always there. A TURN relay is added when configured, so people on strict
+// networks (mobile data, some routers, Brave's privacy settings) can still connect:
+//   Cloudflare Realtime TURN:  CF_TURN_KEY_ID + CF_TURN_API_TOKEN   (short-lived credentials are minted here, the key never reaches the browser)
+//   any other TURN server:     TURN_URLS (comma separated) + TURN_USERNAME + TURN_CREDENTIAL
+let iceCache = { at: 0, servers: null, relay: false };
+async function getIce() {
+  const now = Date.now();
+  if (iceCache.servers && now - iceCache.at < 6 * 3600e3) return iceCache;
+  let servers = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }], relay = false, ok = true;
+  try {
+    if (process.env.CF_TURN_KEY_ID && process.env.CF_TURN_API_TOKEN) {
+      const r = await fetch('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(process.env.CF_TURN_KEY_ID) + '/credentials/generate-ice-servers', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + process.env.CF_TURN_API_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ttl: 86400 }),
+        signal: AbortSignal.timeout(5000)
+      });
+      const j = r.ok ? await r.json() : null;
+      if (j && Array.isArray(j.iceServers) && j.iceServers.length) { servers = j.iceServers; relay = true; }
+      else { ok = false; console.log('TURN credentials request failed:', r.status); }
+    } else if (process.env.TURN_URLS) {
+      servers.push({ urls: process.env.TURN_URLS.split(',').map(x => x.trim()).filter(Boolean), username: process.env.TURN_USERNAME || '', credential: process.env.TURN_CREDENTIAL || '' });
+      relay = true;
+    }
+  } catch (e) { ok = false; console.log('TURN setup failed:', e.message); }
+  iceCache = { at: ok ? now : now - 6 * 3600e3 + 60e3, servers, relay };   // on a failure, try again in a minute
+  return iceCache;
+}
+app.get('/api/ice', async (req, res) => {
+  if (!db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]) return res.sendStatus(401);
+  const c = await getIce();
+  res.json({ iceServers: c.servers, relay: c.relay });
+});
+
 app.post('/api/auth', (req, res) => {
   const { mode, username, password } = req.body || {};
   const name = String(username || '').trim(), k = name.toLowerCase(), pw = String(password || '');
