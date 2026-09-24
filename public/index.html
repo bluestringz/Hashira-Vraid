@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Hashira VRaid</title>
 <link rel="icon" href="/logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
@@ -21,13 +21,13 @@ input[type=checkbox]{width:auto}
 input[type=color]{width:44px;height:36px;padding:2px}
 :focus-visible{outline:2px solid var(--red);outline-offset:1px}
 .hide{display:none!important}
-#login{height:100%;display:grid;place-items:center;padding:16px}
+#login{height:100%;height:100dvh;display:grid;place-items:center;padding:16px}
 .card{background:var(--pan);border:1px solid var(--bd);backdrop-filter:blur(10px);border-radius:10px;padding:24px;width:min(360px,100%);display:grid;gap:10px;text-align:center}
 .card img{width:170px;margin:0 auto}
 .card h1{margin:0;font-size:34px;letter-spacing:.04em}
 .card .row{display:flex;gap:8px}.card .row button{flex:1}
 #err{color:var(--red);min-height:1.2em;font-size:13px}
-#app{height:100%;display:grid;grid-template-columns:250px 1fr 230px}
+#app{height:100%;height:100dvh;display:grid;grid-template-columns:250px minmax(0,1fr) 230px}
 aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-direction:column;min-height:0;min-width:0}
 #side{border-right:1px solid var(--bd)}#mem{border-left:1px solid var(--bd)}
 .hd{padding:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--bd)}
@@ -57,7 +57,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .sec[draggable=true],.ch[draggable=true]{cursor:grab}
 .dt{box-shadow:inset 0 2px 0 var(--red)}.db{box-shadow:inset 0 -2px 0 var(--red)}
 #send{display:flex;gap:8px;padding:12px}
-#vbox{flex:1;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-content:flex-start}
+#vbox{flex:1;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-content:flex-start;overflow:auto}
 .bar{width:100%;display:flex;gap:8px}
 .vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
 .vc button{font-size:11px;padding:2px 6px}
@@ -84,7 +84,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .grp::after{content:'▾'}.grp.fold::after{content:'▸'}
 .tag{font-size:11px;padding:1px 7px;border-radius:9px;color:#fff}
 .x{padding:1px 7px;font-size:13px}
-#modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:12px;z-index:9}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:12px;z-index:25}
 #modal>div{background:var(--solid);border:1px solid var(--bd);border-radius:10px;padding:18px;width:min(440px,100%);max-height:90vh;overflow:auto;display:grid;gap:8px}
 #modal h3{margin:0;font-size:22px}
 .rr{display:grid;gap:6px;padding:10px;border:1px solid var(--bd);border-radius:8px}
@@ -96,7 +96,34 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #ctx hr{border:0;border-top:1px solid var(--bd);margin:4px 0;width:100%}
 #ctx .lbl{padding:4px 10px;color:var(--mut);font-size:12px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--solid);border:1px solid var(--red);padding:8px 14px;border-radius:8px;z-index:30;max-width:90vw}
-@media(max-width:800px){#app{grid-template-columns:1fr;grid-template-rows:38vh 1fr}#mem{display:none}#side{border-right:0}}
+.mob,#scrim{display:none}
+.ch,.mrow,.vm,.vc,.sec,.tag{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+@media(max-width:800px){
+  html,body{overflow:hidden;overscroll-behavior:none}
+  #app{display:block;position:relative;overflow:hidden}
+  main{height:100%;width:100%}
+  .mob{display:inline-flex;align-items:center;justify-content:center;min-width:40px;padding:0;font-size:18px}
+  #top{padding:calc(6px + env(safe-area-inset-top)) 10px 6px;gap:6px}
+  #top h2{font-size:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #side,#mem{position:fixed;top:0;bottom:0;width:min(86vw,330px);z-index:15;padding-top:env(safe-area-inset-top);background:var(--solid);backdrop-filter:none;transition:transform .2s ease}
+  #side{left:0;transform:translateX(-105%)}
+  #mem{right:0;transform:translateX(105%)}
+  #app.navopen #side,#app.memopen #mem{transform:none}
+  #scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:14}
+  #app.navopen #scrim,#app.memopen #scrim{display:block}
+  .me{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+  #send{padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+  #msgs{padding:10px}
+  #vbox{padding:10px;gap:10px}
+  .vgrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  .vt.focus{height:45vh}
+  button{min-height:38px}
+  .x{padding:6px 10px;font-size:15px;min-height:34px;min-width:34px}
+  .ch,.mrow{padding:10px 8px}
+  input,select{font-size:16px}   /* iOS zooms the page when an input is smaller than 16px */
+  #modal>div{max-height:88vh;max-height:88dvh}
+  #toast{bottom:calc(24px + env(safe-area-inset-bottom))}
+}
 </style></head><body>
 
 <div id="login"><form class="card" onsubmit="event.preventDefault();auth('login')">
@@ -109,13 +136,14 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 </form></div>
 
 <div id="app" class="hide">
+  <div id="scrim"></div>
   <aside id="side">
     <div class="hd"><img src="/logo.png" alt=""><span class="brand">Hashira VRaid</span></div>
     <div class="list" id="chl"></div>
     <div class="me" id="me"></div>
   </aside>
   <main>
-    <div id="top"><h2 id="title"></h2><span id="topact"></span></div>
+    <div id="top"><button id="navBtn" class="mob" aria-label="Channels">☰</button><h2 id="title"></h2><span id="topact"></span><button id="memBtn" class="mob" aria-label="Members">👥</button></div>
     <div id="msgs"></div>
     <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
@@ -200,7 +228,7 @@ function addMsg(m){
 function pick(c,quiet){
   cur=c;if(!c)return;
   if(c.type=='text')tx({t:'open',ch:c.id});
-  if(!quiet)render();
+  if(!quiet){closeDrawers();render()}
 }
 
 function render(){
@@ -377,7 +405,7 @@ $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())t
 
 /* ---------- Drag and drop (channels, categories) ---------- */
 let drag=null;const fold=new Set();let managing=null;   // managing: the person whose role box is open, so it refreshes when roles change
-function dg(el,o){el.draggable=true;el.ondragstart=e=>{drag=o;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x');e.stopPropagation()};el.ondragend=()=>{drag=null}}
+function dg(el,o){if(window.matchMedia&&matchMedia('(hover:none)').matches)return;el.draggable=true;el.ondragstart=e=>{drag=o;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x');e.stopPropagation()};el.ondragend=()=>{drag=null}}
 function dz(el,f,uf){   // f: reorder handler (channels/categories), uf: drop handler for a person being moved
   const low=e=>{const r=el.getBoundingClientRect();return e.clientY>=r.top+r.height/2};
   el.ondragover=e=>{
@@ -456,9 +484,25 @@ setInterval(()=>{
   document.querySelectorAll('.vm .av[data-k],.vc .av[data-k],.vt.cam[data-k]').forEach(e=>e.classList.toggle('speaking',sp.has(e.dataset.k)));
 },100);
 
+/* ---------- Phone: slide-in drawers and press-and-hold (= right-click) ---------- */
+function closeDrawers(){$('#app').classList.remove('navopen','memopen')}
+$('#navBtn').onclick=()=>{const a=$('#app');a.classList.remove('memopen');a.classList.toggle('navopen')};
+$('#memBtn').onclick=()=>{const a=$('#app');a.classList.remove('navopen');a.classList.toggle('memopen')};
+$('#scrim').onclick=closeDrawers;
+addEventListener('resize',()=>{if(innerWidth>800)closeDrawers()});
+let ctxT=0,lpT=null,lpX=0,lpY=0;
+document.addEventListener('click',e=>{if(Date.now()-ctxT<600){e.stopPropagation();e.preventDefault()}},true);   // the tap that ends a long press must not also click
+document.addEventListener('touchstart',e=>{
+  if(e.touches.length!=1)return;
+  const t=e.touches[0];lpX=t.clientX;lpY=t.clientY;clearTimeout(lpT);
+  lpT=setTimeout(()=>{const el=document.elementFromPoint(lpX,lpY);if(!el)return;const v=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:lpX,clientY:lpY});v.__lp=true;el.dispatchEvent(v)},550);
+},{passive:true});
+document.addEventListener('touchmove',e=>{const t=e.touches[0];if(Math.abs(t.clientX-lpX)>10||Math.abs(t.clientY-lpY)>10)clearTimeout(lpT)},{passive:true});
+['touchend','touchcancel'].forEach(ev=>document.addEventListener(ev,()=>clearTimeout(lpT),{passive:true}));
+
 /* ---------- Right-click menu and join/leave sounds ---------- */
 function ctx(e,items){
-  e.preventDefault();e.stopPropagation();
+  e.preventDefault();e.stopPropagation();if(e.__lp)ctxT=Date.now();
   const m=$('#ctx');m.replaceChildren();
   items.forEach(i=>{
     if(i===null)m.append(E('hr'));
