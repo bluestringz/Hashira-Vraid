@@ -774,7 +774,7 @@ function panel(){
   const failed=inV?Object.entries(pcState).filter(([k,st])=>st=='failed'&&!relayOn.has(k)&&(S.voice[vc]||[]).includes(k)).map(([k])=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
   if(failed.length){
     const h=E('div','help');h.append(E('b',0,"Can't connect the audio with "+failed.join(', ')+'.'));
-    h.append(E('small',0,ICE.relay?'The app already tried the relay. Ask them to open Audio setup and run the connection test.':"Their network or browser is blocking direct calls. The server admin needs to add a relay (TURN)."));
+    h.append(E('small',0,'Their network or browser is blocking a direct call. Switching to backup audio through the server… If this stays for more than a few seconds, ask them to reload the page.'));
     if(isBrave)h.append(E('small',0,'Brave: open brave://settings, search "WebRTC", set "WebRTC IP handling policy" to "Default public interface only", then reload the page.'));
     const b=E('button',0,'Audio setup and connection test');b.onclick=audioSetup;h.append(b);v.append(h);
   }
