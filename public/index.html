@@ -61,7 +61,11 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .bar{width:100%;display:flex;flex-wrap:wrap;gap:8px}
 .vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
 .vc button{font-size:11px;padding:2px 6px}
+.lonly{align-self:center;font-size:13px;color:var(--mut);padding:0 6px}
 .lmrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.vol{display:flex;align-items:center;gap:6px;font-size:12px;width:100%}.vol input{flex:1;min-width:0;accent-color:var(--red);border:0;padding:0;margin:0;background:none;box-shadow:none;outline:0;height:auto}
+.m .tag+.tag{margin-left:3px}.vol span:last-child{min-width:34px;text-align:right;color:var(--mut)}
+#ctx .vol{padding:2px 10px 6px}
 .meter{height:10px;background:var(--pan2);border-radius:5px;overflow:hidden}.meter i{display:block;height:100%;width:0;background:#3ba55d;transition:width .08s}
 .cst{font-size:11px;color:var(--mut)}.cst.bad{color:#ff5a67}
 .help{background:var(--pan2);border:1px solid var(--red);border-radius:8px;padding:10px;width:100%;display:grid;gap:6px}
@@ -163,7 +167,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 <script>
 const $=s=>document.querySelector(s);
 const E=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
-let ws,S=null,cur=null,tok=localStorage.tk,local=null,muted=false,deaf=false,vc=null;
+let ws,S=null,cur=null,tok=localStorage.tk,local=null,muted=false,deaf=false,vc=null,noMic=false;   // noMic: in voice without a microphone (listening only)
 const pcs={},auds={};
 let desired=null,joining=false,joinedAt=0,misses=0,lost=false,rc=null,rt=null;   // desired: the voice channel I want to be in, so the app can get me back after a hiccup
 try{desired=sessionStorage.vc||null}catch{}   // survives a page refresh (this tab only), so a refresh puts you back in voice
@@ -190,7 +194,7 @@ function connect(){
       if(e.code!=4004)delete localStorage.tk;   // 4004 = signed in elsewhere; keep the token so another tab of this browser keeps working
       tok=null;S=null;
       $('#app').classList.add('hide');$('#login').classList.remove('hide');
-      $('#err').textContent=e.code==4002?'You were kicked. You can log in again.':e.code==4003?'This account is banned.':e.code==4004?'Your account was logged in from another device or browser tab, so this session was disconnected.':'Your session ended. Please log in again.';
+      $('#err').textContent=e.code==4002?'You were kicked. You can log in again.':e.code==4003?'This account is banned.':e.code==4004?'Your account was logged in from another device or browser tab, so this session was disconnected.':e.code==4005?'Your password was changed, so this device was signed out. Log in with the new password.':e.code==4006?'This account was deleted by the admin.':'Your session ended. Please log in again.';
     }else{
       if(!lost){lost=true;toast('Connection lost. Reconnecting…')}
       clearTimeout(rc);rc=setTimeout(connect,2000);   // when it is back, the app rejoins your voice channel by itself
@@ -233,10 +237,18 @@ function avEl(k,name,cls){
   return a;
 }
 function tag(id){const r=S.roles[id]||{name:id,color:'#777'};const t=E('span','tag',r.name);t.style.background=r.color;return t}
+const rRank=id=>id=='admin'?1e3:id=='default'?-1:((S.roles[id]||{}).perms||[]).length;
+const rName=id=>(S.roles[id]||{name:id}).name;
+// every role a person has (highest first); Default only when they have no other role
+function rolesOf(u){
+  if(u.role=='admin')return['admin'];
+  const r=(u.roles||[]).filter(id=>id!='default'&&S.roles[id]).sort((a,b)=>rRank(b)-rRank(a)||rName(a).localeCompare(rName(b)));
+  return r.length?r:['default'];
+}
 function addMsg(m){
   const d=E('div','m');d.append(avEl(m.key,m.name));
   const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
-  const nb=E('b',0,(u?u.name:m.name)+' ');if(u)nb.oncontextmenu=e=>userMenu(e,u);h.append(nb);if(u)h.append(tag(u.role),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+  const nb=E('b',0,(u?u.name:m.name)+' ');if(u)nb.oncontextmenu=e=>userMenu(e,u);h.append(nb);if(u)h.append(...rolesOf(u).map(tag),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
   const mid=m.id||m.ts;d.dataset.id=mid;
   if(S.me.role=='admin'){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}
   b.append(h,E('p',0,m.text));d.append(b);
@@ -292,7 +304,7 @@ function render(){
   const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Change profile picture';a.onclick=()=>$('#file').click();
   const nm=E('b',0,mu.name);nm.style.cursor='pointer';nm.title='Settings';nm.onclick=settings;
   const r1=E('div','r');r1.append(a,nm,tag(me.role));r1.oncontextmenu=e=>userMenu(e,mu);
-  const r2=E('div','r btns'),eff=muted||deaf||svm()||svd();
+  const r2=E('div','r btns'),eff=muted||deaf||svm()||svd()||(vc&&noMic);
   const mic=E('button');mic.title=svm()||svd()?'Muted by a moderator':eff?'Unmute':'Mute';mic.append(ico('🎤',eff));mic.onclick=toggleMute;
   const hp=E('button');hp.title=svd()?'Deafened by a moderator':deaf?'Undeafen':'Deafen';hp.append(ico('🎧',deaf||svd()));hp.onclick=toggleDeaf;
   const th=E('button',0,'◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
@@ -312,7 +324,7 @@ function render(){
   const rank=id=>id=='admin'?1e3:id=='default'?-1:(S.roles[id]?S.roles[id].perms.length:0);
   const nameOf=id=>id=='~banned'?'Banned':(S.roles[id]?S.roles[id].name:id);
   const groups={};
-  S.users.forEach(u=>{if(u.banned&&!staffView)return;const g=u.banned?'~banned':u.role;(groups[g]=groups[g]||[]).push(u)});
+  S.users.forEach(u=>{if(u.banned&&!staffView)return;(u.banned?['~banned']:rolesOf(u)).forEach(g=>(groups[g]=groups[g]||[]).push(u))});   // listed under every role they have
   Object.keys(groups).sort((a,b)=>a=='~banned'?1:b=='~banned'?-1:rank(b)-rank(a)||nameOf(a).localeCompare(nameOf(b))).forEach(g=>{
     const list=groups[g].sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name));
     const h=E('div','grp'+(fold.has(g)?' fold':'')),dot=E('i');
@@ -324,7 +336,7 @@ function render(){
     list.forEach(u=>{
       const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
       r.append(avEl(u.key,u.name),E('span',0,u.name));
-      r.title=(u.roles&&u.roles.length?u.roles.map(nameOf).join(', '):'Default');r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title+=' (click or right-click to manage)';r.onclick=()=>manage(u)}
+      r.title=rolesOf(u).map(nameOf).join(', ');r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title+=' (click or right-click to manage)';r.onclick=()=>manage(u)}
       M.append(r);
     });
   });
@@ -447,14 +459,25 @@ const svm=()=>!!(S&&S.me.sv&&S.me.sv.m),svd=()=>!!(S&&S.me.sv&&S.me.sv.d);
 // "Mute for me": only this browser stops hearing that person; everyone else still hears them. Saved in this browser.
 let lmute=new Set();try{lmute=new Set(JSON.parse(localStorage.lm||'[]'))}catch{}
 const saveLM=()=>{try{localStorage.lm=JSON.stringify([...lmute])}catch{}};
+let vols={};try{vols=JSON.parse(localStorage.vol||'{}')}catch{}   // per-person volume, only on this device
+const volOf=k=>vols[k]==null?100:vols[k];
+function setVol(k,v){v=Math.max(0,Math.min(100,Math.round(v)));if(v==100)delete vols[k];else vols[k]=v;try{localStorage.vol=JSON.stringify(vols)}catch{};if(auds[k])auds[k].volume=v/100}
+function volSlider(k){
+  const w=E('div','vol'),r=E('input'),p=E('span',0,volOf(k)+'%');
+  r.type='range';r.min=0;r.max=100;r.step=5;r.value=volOf(k);r.title='Volume for you only';
+  r.oninput=()=>{setVol(k,+r.value);p.textContent=r.value+'%'};
+  r.ondblclick=()=>{r.value=100;r.oninput()};   // double-click = back to 100%
+  ['click','mousedown','pointerdown','touchstart','contextmenu'].forEach(ev=>w.addEventListener(ev,e=>e.stopPropagation()));
+  w.append(E('span',0,'🔉'),r,p);return w;
+}
 function toggleLM(k){lmute.has(k)?lmute.delete(k):lmute.add(k);saveLM();syncAudio();render()}
 const hear=()=>!(deaf||svd());
 const audioMuted=k=>!hear()||peerMuted(k)||lmute.has(k);
 const peerMuted=k=>{const v=S&&S.sv&&S.sv[k];return !!(v&&(v.m||v.d))};   // everyone silences server-muted people, so it holds even if their own app ignores it
 function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!(muted||deaf||svm()||svd()))}
-function syncAudio(){Object.entries(auds).forEach(([k,a])=>a.muted=audioMuted(k))}
+function syncAudio(){Object.entries(auds).forEach(([k,a])=>{a.muted=audioMuted(k);a.volume=volOf(k)/100})}
 function setVS(){applyMic();syncAudio();sendVS();render()}
-function toggleMute(){if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
+function toggleMute(){if(vc&&noMic)return toast('No microphone: you are listening only. Plug in a mic or allow it, then pick it in Audio setup.');if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
 function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS()}
 let tt;function toast(t){const e=$('#toast');e.textContent=t;e.classList.remove('hide');clearTimeout(tt);tt=setTimeout(()=>e.classList.add('hide'),3500)}
 function voiceItems(u){
@@ -478,12 +501,36 @@ function settings(){
   const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
   const pic=E('button',0,'Change profile picture');pic.onclick=()=>{close();$('#file').click()};
   const items=[E('label',0,'Display name'),n,E('small',0,'Your login username stays "'+S.me.key+'".'),sv,pic];
+  const cp=E('button',0,'Change password');cp.onclick=passModal;items.push(cp);
   const au=E('button',0,'Audio setup (microphone, speakers, connection test)');au.onclick=audioSetup;items.push(au);
   items.push(E('label',0,'Muted for me (only you stop hearing them)'));
   if(!lmute.size)items.push(E('small',0,'Nobody. Right-click a person, or use the button under them in the voice panel.'));
   [...lmute].forEach(k=>{const u=S.users.find(x=>x.key==k),row=E('div','lmrow'),b=E('button',0,'Unmute');row.append(E('span',0,u?u.name:k),b);b.onclick=()=>{toggleLM(k);settings()};items.push(row)});
+  const vk=Object.keys(vols);
+  if(vk.length){items.push(E('label',0,'Volume changed for me'));vk.forEach(k=>{const u=S.users.find(x=>x.key==k),row=E('div','lmrow'),b=E('button',0,'Reset to 100%');row.append(E('span',0,(u?u.name:k)+' ('+vols[k]+'%)'),b);b.onclick=()=>{setVol(k,100);settings()};items.push(row)})}
   if(S.me.perms.includes('roles')){const r=E('button',0,'Manage roles');r.onclick=roleModal;items.push(r)}
   modal('Settings',...items);
+}
+function passModal(){
+  const f=()=>{const i=E('input');i.type='password';i.autocomplete='new-password';i.maxLength=100;return i};
+  const o=f(),n=f(),c=f(),err=E('small','perr'),b=E('button','p','Change password');o.autocomplete='current-password';
+  err.style.color='#e5484d';
+  b.onclick=async()=>{
+    err.textContent='';
+    if(n.value.length<6)return err.textContent='New password: at least 6 characters';
+    if(n.value!==c.value)return err.textContent='The new passwords do not match';
+    b.disabled=true;
+    try{
+      const r=await fetch('/api/password',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},body:JSON.stringify({current:o.value,password:n.value})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){err.textContent=j.error||'Could not change the password';return}
+      close();toast('Password changed. Your other devices were signed out.');
+    }catch{err.textContent='Could not reach the server. Try again.'}
+    finally{b.disabled=false}
+  };
+  [o,n,c].forEach(i=>i.onkeydown=e=>{if(e.key=='Enter')b.click()});
+  modal('Change password',E('label',0,'Current password'),o,E('label',0,'New password'),n,E('label',0,'Confirm new password'),c,err,b);
+  setTimeout(()=>o.focus(),50);
 }
 let actx;const an={};
 function watch(k,stream){
@@ -525,6 +572,7 @@ function ctx(e,items){
   items.forEach(i=>{
     if(i===null)m.append(E('hr'));
     else if(typeof i=='string')m.append(E('div','lbl',i));
+    else if(i instanceof Node)m.append(i);
     else{const b=E('button',i[2]||'',i[0]);b.onclick=()=>{hideCtx();i[1]()};m.append(b)}
   });
   m.classList.remove('hide');
@@ -536,6 +584,10 @@ document.addEventListener('click',hideCtx);
 document.addEventListener('contextmenu',e=>{if(!e.defaultPrevented)hideCtx()});
 document.addEventListener('keydown',e=>{if(e.key=='Escape')hideCtx()});
 addEventListener('resize',hideCtx);
+function delUser(u){
+  if(!confirm('Delete the account "'+u.name+'" (login: '+u.key+')?\n\nThey are signed out and cannot log in again. Their old chat messages stay. This cannot be undone.'))return;
+  tx({t:'deluser',key:u.key});
+}
 function userMenu(e,u){
   const me=S.me,it=[u.name];
   if(u.key==me.key){
@@ -544,11 +596,12 @@ function userMenu(e,u){
       [muted||deaf||svm()||svd()?'Unmute':'Mute',toggleMute],
       [deaf||svd()?'Undeafen':'Deafen',toggleDeaf]);
   }else if(u.banned){
-    if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})]);
+    if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})],null,['Delete account',()=>delUser(u),'dng']);
   }else{
-    it.push([lmute.has(u.key)?'Unmute for me':'Mute for me',()=>toggleLM(u.key)]);
+    it.push('User volume (only for you)',volSlider(u.key),[lmute.has(u.key)?'Unmute for me':'Mute for me',()=>toggleLM(u.key)]);
     if(canAssign(u))it.push(null,['Manage roles…',()=>manage(u)]);
     if(kickOk(u))it.push(null,['Kick',()=>tx({t:'kick',key:u.key}),'dng'],['Ban',()=>confirm('Ban '+u.name+'?')&&tx({t:'ban',key:u.key}),'dng']);
+    if(me.role=='admin'&&u.role!='admin')it.push(['Delete account',()=>delUser(u),'dng']);
   }
   const vi=voiceItems(u);if(vi.length)it.push(null,...vi);
   if(it.length>1)ctx(e,it);
@@ -611,6 +664,7 @@ function toneUrl(){   // a short two-note chime as a WAV file, so the speaker te
   return _tone=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));
 }
 async function switchMic(){   // change microphone while in a call
+  if(vc&&noMic){const id=vc;leaveVoice();return joinVoice(id)}   // was listening only: rejoin so the new mic is sent to everyone
   let s;try{s=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){return micError(e)}
   const t=s.getAudioTracks()[0];
   Object.values(pcs).forEach(pc=>pc.getSenders().forEach(x=>{if(x.track&&x.track.kind=='audio')x.replaceTrack(t).catch(()=>{})}));
@@ -673,7 +727,7 @@ async function audioSetup(){
 
 /* ---------- Voice panel: people and video tiles ---------- */
 const vst={},vel={};let camS=null,scrS=null,focusT=null;   // vst: remote video streams per person, vel: cached <video> elements (so they don't restart on every redraw)
-function sendVS(){tx({t:'vs',m:muted,d:deaf,cam:camS?camS.id:null,scr:scrS?scrS.id:null})}
+function sendVS(){tx({t:'vs',m:muted||(!!vc&&noMic),d:deaf,cam:camS?camS.id:null,scr:scrS?scrS.id:null})}
 function videos(k){
   const out=[];
   if(k==S.me.key){if(camS)out.push({id:camS.id,kind:'cam',stream:camS});if(scrS)out.push({id:scrS.id,kind:'scr',stream:scrS});return out}
@@ -697,7 +751,7 @@ function vtile(u,x,used){
 function atile(u){
   const k=u.key,c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));
   const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}
-  if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(b)}
+  if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(volSlider(k),b)}
   const sc=stChip(k);if(sc)c.append(sc);
   return c;
 }
@@ -707,6 +761,7 @@ function panel(){
   const j=E('button','p',joining?'Joining…':inV?'Leave voice':'Join voice');
   j.onclick=()=>{if(joining||Date.now()-joinedAt<800)return;vc==cur.id?leaveVoice():joinVoice(cur.id)};   // a double click must not join and then leave
   bar.append(j);
+  if(vc==cur.id&&noMic){const n=E('span','lonly','🎧 Listening only (no microphone)');n.title='Plug in or allow a microphone, then pick it in Audio setup to talk';bar.append(n)}
   if(inV){
     const cb=E('button',0,camS?'Turn off camera':'Turn on camera');cb.onclick=toggleCam;bar.append(cb);
     if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia){const sb=E('button',0,scrS?'Stop sharing':'Share screen');sb.onclick=toggleScreen;bar.append(sb)}
@@ -769,7 +824,12 @@ async function joinVoice(id){
   joining=true;if(cur&&cur.type=='voice')panel();
   try{
     if(vc)leaveVoice();
-    let st;try{st=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){want(null);return micError(e)}
+    let st;noMic=false;
+    try{st=await navigator.mediaDevices.getUserMedia(micConstraints())}
+    catch(e){   // no mic, mic blocked, or mic busy: still join, just listening
+      st=new MediaStream();noMic=true;
+      toast('No microphone available, so you joined listening only. Others cannot hear you.');
+    }
     local=st;await loadIce();
     want(id);vc=id;joinedAt=Date.now();misses=0;
     applyMic();watch(S.me.key,local);tx({t:'join',ch:id});sendVS();sJoin();
@@ -794,7 +854,7 @@ function leaveVoice(quiet){
   Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
   ['cam','scr'].forEach(killVideo);
   if(local)local.getTracks().forEach(t=>t.stop());
-  local=null;if(vc&&!quiet){tx({t:'leave'});sLeave()}
+  local=null;noMic=false;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
 function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
@@ -823,7 +883,7 @@ function mk(k,init){
   pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
   pc.ontrack=e=>{
     const st=e.streams[0]||new MediaStream([e.track]);
-    if(e.track.kind=='audio'){const a=auds[k]||(auds[k]=new Audio());a.srcObject=st;a.muted=audioMuted(k);setSink(a);const p=a.play();p&&p.catch&&p.catch(()=>$('#sndfix').classList.remove('hide'));watch(k,st)}
+    if(e.track.kind=='audio'){const a=auds[k]||(auds[k]=new Audio());a.srcObject=st;a.muted=audioMuted(k);a.volume=volOf(k)/100;setSink(a);const p=a.play();p&&p.catch&&p.catch(()=>$('#sndfix').classList.remove('hide'));watch(k,st)}
     else{(vst[k]=vst[k]||new Map()).set(st.id,st);if(cur&&cur.type=='voice')panel()}
   };
   pc.onnegotiationneeded=async()=>{
@@ -832,6 +892,7 @@ function mk(k,init){
     catch{}finally{pc._m=false}
   };
   local.getTracks().forEach(t=>pc.addTrack(t,local));
+  if(init&&!local.getAudioTracks().length)pc.addTransceiver('audio',{direction:'recvonly'});   // no mic: still receive everyone's voice
   if(camS)addVideo(pc,camS);if(scrS)addVideo(pc,scrS);
   return pc;
 }
