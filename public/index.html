@@ -853,7 +853,8 @@ async function toggleCam(){
 const SQ={
   smooth:{label:'Smooth: games and videos (720p, 30 fps)',w:1280,h:720,fps:30,hint:'motion',kbps:2500},
   balanced:{label:'Balanced (720p, 15 fps)',w:1280,h:720,fps:15,hint:'detail',kbps:1800},
-  text:{label:'Sharp text: documents and code (1080p, 5 fps)',w:1920,h:1080,fps:5,hint:'text',kbps:1500}};
+  text:{label:'Sharp text: documents and code (1080p, 5 fps)',w:1920,h:1080,fps:5,hint:'text',kbps:1500},
+  best:{label:'Best: 1080p, 30 fps (needs a fast upload, about 5 Mbps per viewer)',w:1920,h:1080,fps:30,hint:'motion',kbps:4500}};
 // What each viewer can pick for a screen share they watch (the sharer sends every viewer their own copy, so each can differ).
 // Auto: as clear as the connections allow (the browser adapts to the network by itself).
 const VQ={auto:'Auto',high:'High',medium:'Medium',low:'Low (saves data)'};
@@ -865,7 +866,7 @@ function toggleScreen(){
   if(!vc)return;
   if(scrS)return stopVideo('scr');
   const bs=Object.entries(SQ).map(([k,q])=>{const b=E('button',k==scrQ?'p':'',q.label);b.onclick=()=>{close();scrQ=k;try{localStorage.sq=k}catch{};startScreen()};return b});   // the click also lets the browser open its picker
-  modal('Share screen',E('small',0,'Pick a quality. If it lags, choose Balanced or Sharp text.'),...bs);
+  modal('Share screen',E('small',0,'Pick a quality. If it lags or looks blurry for others, choose a lower one.'),...bs);
 }
 async function startScreen(){
   const q=SQ[scrQ];let s;
@@ -882,7 +883,7 @@ function tuneVideo(){
     const scr=scrS&&scrS.getVideoTracks()[0]===t,q=SQ[scrQ],want=pc._vq||'auto';
     let kbps,scale=1;
     if(!scr)kbps=Math.max(150,Math.min(600,Math.round(1200/n)));
-    else if(want=='high')kbps=Math.round(q.kbps*1.6);
+    else if(want=='high')kbps=Math.min(6000,Math.round(q.kbps*1.6));
     else if(want=='medium')kbps=Math.min(1000,q.kbps);
     else if(want=='low'){kbps=400;scale=2}
     else kbps=Math.max(800,Math.min(q.kbps,Math.round(10000/n)));   // auto: share an upload of about 10 Mbps, never below 0.8 Mbps each
