@@ -41,7 +41,12 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .av{width:30px;height:30px;border-radius:50%;background:var(--red);color:#fff;display:grid;place-items:center;font-weight:700;overflow:hidden;flex:none;position:relative;font-size:13px}
 .av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .vm .av{width:20px;height:20px;font-size:10px}.av.big{width:64px;height:64px;font-size:24px}
-.me{padding:10px;border-top:1px solid var(--bd);display:flex;gap:6px;align-items:center}
+.av{transition:box-shadow .1s}.av.speaking{box-shadow:0 0 0 3px #3ba55d}.vm .av.speaking{box-shadow:0 0 0 2px #3ba55d}
+.ico{position:relative;display:inline-block;margin-left:2px}
+.ico.off::after{content:'';position:absolute;left:-2px;right:-2px;top:50%;height:2px;background:var(--red);transform:rotate(-45deg);border-radius:1px}
+.me{padding:10px;border-top:1px solid var(--bd);display:grid;gap:8px}
+.me .r{display:flex;gap:6px;align-items:center}
+.me .btns button{flex:1;padding:5px}
 .me b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #top{padding:12px 16px;border-bottom:1px solid var(--bd)}
 #top h2{margin:0;font-size:22px}
@@ -94,7 +99,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 <script>
 const $=s=>document.querySelector(s);
 const E=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
-let ws,S=null,cur=null,tok=localStorage.tk,local=null,muted=false,vc=null;
+let ws,S=null,cur=null,tok=localStorage.tk,local=null,muted=false,deaf=false,vc=null;
 const pcs={},auds={};
 document.documentElement.dataset.theme=localStorage.th||'dark';
 
@@ -106,6 +111,7 @@ async function auth(mode){
 }
 function connect(){
   ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
+  ws.onopen=()=>tx({t:'vs',m:muted,d:deaf});
   ws.onmessage=e=>on(JSON.parse(e.data));
   ws.onclose=e=>{
     leaveVoice(true);
@@ -130,10 +136,11 @@ function on(m){
   else if(m.t=='peers')m.peers.forEach(k=>mk(k,true));
   else if(m.t=='sig')onSig(m.from,m.data);
   else if(m.t=='kicked'||m.t=='denied')leaveVoice(true);
+  else if(m.t=='error')alert(m.msg);
 }
 
 function avEl(k,name,cls){
-  const a=E('div','av '+(cls||''),(name||'?')[0].toUpperCase());
+  const a=E('div','av '+(cls||''),(name||'?')[0].toUpperCase());a.dataset.k=k;
   const u=S&&S.users.find(x=>x.key==k);
   if(u&&u.av){const i=new Image();i.src='/av/'+k+'?v='+u.av;i.onerror=()=>i.remove();a.append(i)}
   return a;
@@ -142,7 +149,7 @@ function tag(id){const r=S.roles[id]||{name:id,color:'#777'};const t=E('span','t
 function addMsg(m){
   const d=E('div','m');d.append(avEl(m.key,m.name));
   const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
-  h.append(E('b',0,m.name+' '));if(u)h.append(tag(u.role),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+  h.append(E('b',0,(u?u.name:m.name)+' '));if(u)h.append(tag(u.role),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
   b.append(h,E('p',0,m.text));d.append(b);
   const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
 }
@@ -164,17 +171,23 @@ function render(){
       if(P('channels')){const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b)}
       if(me.role=='admin'&&c.id!='open'){const b=E('button','x','🗑');b.title='Delete';b.onclick=e=>{e.stopPropagation();confirm('Delete "'+c.name+'"?')&&tx({t:'delch',id:c.id})};d.append(b)}
       d.onclick=()=>pick(c);L.append(d);
-      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.append(avEl(k,u.name),E('span',0,u.name));L.append(v)});
+      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.append(avEl(k,u.name),E('span',0,u.name),...vsI(k));L.append(v)});
     });
   });
   // my footer
   const f=$('#me'),mu=S.users.find(x=>x.key==me.key);f.replaceChildren();
   const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Change profile picture';a.onclick=()=>$('#file').click();
-  const nm=E('b',0,mu.name);
-  const th=E('button','x','◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
-  f.append(a,nm,tag(me.role),th);
-  if(me.role=='admin'){const g=E('button','x','⚙');g.title='Roles settings';g.onclick=roleModal;f.append(g)}
-  const lo=E('button','x','⎋');lo.title='Logout';lo.onclick=()=>{delete localStorage.tk;location.reload()};f.append(lo);
+  const nm=E('b',0,mu.name);nm.style.cursor='pointer';nm.title='Settings';nm.onclick=settings;
+  const r1=E('div','r');r1.append(a,nm,tag(me.role));
+  const r2=E('div','r btns'),eff=muted||deaf;
+  const mic=E('button');mic.title=eff?'Unmute':'Mute';mic.append(ico('🎤',eff));
+  mic.onclick=()=>{if(deaf){deaf=false;muted=false}else muted=!muted;setVS()};
+  const hp=E('button');hp.title=deaf?'Undeafen':'Deafen';hp.append(ico('🎧',deaf));
+  hp.onclick=()=>{deaf=!deaf;setVS()};
+  const th=E('button',0,'◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
+  const st=E('button',0,'⚙');st.title='Settings';st.onclick=settings;
+  const lo=E('button',0,'⎋');lo.title='Log out';lo.onclick=()=>{delete localStorage.tk;location.reload()};
+  r2.append(mic,hp,th,st,lo);f.append(r1,r2);
   // main
   const txt=cur&&cur.type=='text';
   $('#title').textContent=cur?(txt?'# ':'🔊 ')+cur.name:'';
@@ -250,32 +263,61 @@ $('#file').onchange=e=>{
 };
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
 
+/* ---------- Settings, mute / deafen, speaking indicator ---------- */
+const ico=(c,off)=>E('span','ico'+(off?' off':''),c);
+const vsI=k=>{const s=(S.vs||{})[k]||{};return s.d?[ico('🎤',1),ico('🎧',1)]:s.m?[ico('🎤',1)]:[]};
+function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!muted&&!deaf)}
+function setVS(){applyMic();Object.values(auds).forEach(a=>a.muted=deaf);tx({t:'vs',m:muted,d:deaf});render()}
+function settings(){
+  const me=S.users.find(x=>x.key==S.me.key),n=E('input');n.value=me.name;n.maxLength=20;
+  const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
+  const pic=E('button',0,'Change profile picture');pic.onclick=()=>{close();$('#file').click()};
+  const items=[E('label',0,'Display name'),n,E('small',0,'Your login username stays "'+S.me.key+'".'),sv,pic];
+  if(S.me.role=='admin'){const r=E('button',0,'Manage roles');r.onclick=roleModal;items.push(r)}
+  modal('Settings',...items);
+}
+let actx;const an={};
+function watch(k,stream){
+  unwatch(k);
+  try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();actx.resume();
+    const src=actx.createMediaStreamSource(stream),a=actx.createAnalyser();a.fftSize=512;src.connect(a);
+    an[k]={a,src,buf:new Uint8Array(a.fftSize),t:0}}catch{}
+}
+function unwatch(k){if(an[k]){try{an[k].src.disconnect()}catch{}delete an[k]}}
+setInterval(()=>{
+  const sp=new Set(),now=Date.now();
+  for(const k in an){const o=an[k];o.a.getByteTimeDomainData(o.buf);let s=0;
+    for(const v of o.buf){const d=(v-128)/128;s+=d*d}
+    if(Math.sqrt(s/o.buf.length)>0.03)o.t=now;
+    if(now-o.t<300)sp.add(k)}
+  document.querySelectorAll('.vm .av[data-k],.vc .av[data-k]').forEach(e=>e.classList.toggle('speaking',sp.has(e.dataset.k)));
+},100);
+
 /* ---------- Voice (WebRTC mesh, best for small groups) ---------- */
 function panel(){
   const v=$('#vbox');v.replaceChildren();
   const inV=vc==cur.id,bar=E('div','bar');
   const j=E('button','p',inV?'Leave voice':'Join voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
-  if(inV){const mb=E('button',0,muted?'Unmute':'Mute');mb.onclick=()=>{muted=!muted;local.getAudioTracks().forEach(t=>t.enabled=!muted);panel()};bar.append(mb)}
   v.append(bar);
-  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.append(avEl(k,u.name,'big'),E('div',0,u.name));v.append(c)});
+  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.append(avEl(k,u.name,'big'),E('div',0,u.name));const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}v.append(c)});
 }
 async function joinVoice(id){
   try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
   catch{return alert('Microphone permission and HTTPS are required.')}
-  vc=id;muted=false;tx({t:'join',ch:id});
+  vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});tx({t:'vs',m:muted,d:deaf});
 }
 function leaveVoice(quiet){
-  Object.keys(pcs).forEach(closePeer);
+  Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
   if(local)local.getTracks().forEach(t=>t.stop());
   local=null;if(vc&&!quiet)tx({t:'leave'});
   vc=null;if(S&&cur)render();
 }
-function closePeer(k){pcs[k]&&pcs[k].close();delete pcs[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
 function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pcs[k]=pc;
   pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
-  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.play().catch(()=>{})};
+  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.muted=deaf;a.play().catch(()=>{});watch(k,e.streams[0])};
   if(init)pc.onnegotiationneeded=async()=>{await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})};
   local.getTracks().forEach(t=>pc.addTrack(t,local));
   return pc;
