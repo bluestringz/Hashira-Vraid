@@ -78,8 +78,12 @@ function seedAdmin() {
     if (!/^#[0-9a-f]{6}$/i.test(r.color || '')) r.color = '#888888';
   }   // roles allowed into a channel (empty = the older open/private rule)
   save();
-  if (!U(AU) || process.env.ADMIN_PASS) {
+  // ADMIN_PASS is applied when the admin account is first made, and again only when the value in Render is changed,
+  // so a password the admin changes inside the app is not undone by the next redeploy.
+  const envSig = process.env.ADMIN_PASS ? crypto.createHash('sha256').update(process.env.ADMIN_PASS).digest('hex') : '';
+  if (!U(AU) || (envSig && db.adminEnv !== envSig)) {
     db.users[AU] = { ...(U(AU) || { name: AU }), roles: ['admin'], pass: hash(process.env.ADMIN_PASS || '@Qaz123qaz') };
+    db.adminEnv = envSig;
     save();
   }
   if (U(AU) && !U(AU).roles.includes('admin')) { U(AU).roles.push('admin'); save(); }
@@ -148,6 +152,29 @@ app.post('/api/auth', (req, res) => {
   const token = crypto.randomBytes(24).toString('hex');
   db.sessions[token] = k; save();
   res.json({ token });
+});
+
+// Change your own password. Needs the current one. Every other device of this account is signed out; this one stays in.
+const tries = {};   // wrong current-password attempts per account, to slow down guessing
+app.post('/api/password', (req, res) => {
+  const t = (req.headers.authorization || '').replace(/^Bearer /, ''), k = db.sessions[t], u = k && U(k);
+  if (!u) return res.sendStatus(401);
+  const { current, password } = req.body || {}, pw = String(password || '');
+  const tr = tries[k] || (tries[k] = { n: 0, until: 0 });
+  if (Date.now() < tr.until) return res.status(429).json({ error: 'Too many wrong attempts. Try again in a few minutes.' });
+  if (!same(String(current || ''), u.pass)) {
+    if (++tr.n >= 5) { tr.n = 0; tr.until = Date.now() + 5 * 60e3; }
+    return res.status(400).json({ error: 'Current password is wrong' });
+  }
+  delete tries[k];
+  if (pw.length < 6) return res.status(400).json({ error: 'New password: at least 6 characters' });
+  if (pw.length > 100) return res.status(400).json({ error: 'New password is too long' });
+  u.pass = hash(pw);
+  for (const x in db.sessions) if (db.sessions[x] === k && x !== t) delete db.sessions[x];
+  live().filter(x => x.key === k && x.tok !== t).forEach(x => { setVoice(x, null, 'password changed'); x.key = null; x.close(4005); });
+  console.log('[auth] password changed for', k);
+  save(); push();
+  res.json({ ok: true });
 });
 
 const server = http.createServer(app);
@@ -237,11 +264,11 @@ wss.on('connection', (w, req) => {
     } catch (e) { console.error('[ws] close handler failed:', e); }
   });
   try {
-    const k = db.sessions[new URL(req.url, 'http://x').searchParams.get('token')];
+    const tok = new URL(req.url, 'http://x').searchParams.get('token'), k = db.sessions[tok];
     if (!k || !U(k)) return w.close(4001);
     if (db.banned[k]) return w.close(4003);
     dropSockets(k);   // newest connection wins, so the same account can't be online twice
-    w.key = k; w.voice = null; push();
+    w.key = k; w.tok = tok; w.voice = null; push();
     w.on('message', raw => {
       w.isAlive = true;
       let m; try { m = JSON.parse(raw); } catch { return; }
@@ -366,6 +393,15 @@ function handle(w, m) {
       done(); break;
     }
     case 'unban': if (adm && db.banned[m.key]) { delete db.banned[m.key]; done(); } break;
+    case 'deluser': {   // admin only: remove an account completely (its old chat messages stay, shown with the old name)
+      const t = String(m.key || '');
+      if (!adm || !U(t) || isAdm(t) || t === k) break;
+      live().filter(x => x.key === t).forEach(x => { setVoice(x, null, 'account deleted'); x.key = null; x.close(4006); });
+      delete db.users[t]; delete db.banned[t]; delete srv[t];
+      for (const s in db.sessions) if (db.sessions[s] === t) delete db.sessions[s];
+      console.log('[admin] deleted account', t);
+      done(); break;
+    }
     case 'togglerole': {   // add or remove one role; a person can have as many as needed
       const t = U(m.key), rid = String(m.role), r = Object.hasOwn(db.roles, rid) ? db.roles[rid] : null;
       if (!t || !r || rid === 'default') break;
@@ -432,6 +468,8 @@ async function boot() {
   try { await load(); }
   catch (e) { console.error('Could not load saved data, not starting (it would overwrite it):', e.message); process.exit(1); }
   seedAdmin();
+  const fatal = e => { console.error('Server could not start:', e.message); process.exit(1); };   // e.g. port in use: exit so Render restarts it
+  server.on('error', fatal); wss.on('error', fatal);
   server.listen(process.env.PORT || 3000, () => console.log('Hashira VRaid running (' + (pool ? 'Postgres' : 'data.json') + ')'));
 }
 boot();
