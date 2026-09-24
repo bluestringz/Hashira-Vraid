@@ -250,7 +250,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key)
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || ''
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
