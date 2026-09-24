@@ -66,15 +66,19 @@ const can = (k, c) => c && (c.open || P(k).includes('private'));
 
 function push() {
   live().forEach(w => { if (w.voice && !can(w.key, chan(w.voice))) { w.voice = null; send(w, { t: 'kicked' }); } });
-  const voice = {};
-  live().forEach(w => w.voice && (voice[w.voice] = voice[w.voice] || []).push(w.key));
+  const voice = {}, vs = {};
+  live().forEach(w => {
+    if (!w.voice) return;
+    (voice[w.voice] = voice[w.voice] || []).push(w.key);
+    if (w.m || w.d) vs[w.key] = { m: !!w.m, d: !!w.d };
+  });
   const users = Object.entries(db.users).map(([key, u]) => ({
     key, name: u.name, role: u.role, av: u.av || 0, banned: !!db.banned[key], on: live().some(w => w.key === key)
   }));
   const roles = { admin: { name: 'Admin', color: '#b8860b', perms: ALL }, ...db.roles };
   live().forEach(w => send(w, {
     t: 'state', me: { key: w.key, role: db.users[w.key].role, perms: P(w.key) },
-    roles, users, voice, channels: db.channels.filter(c => can(w.key, c))
+    roles, users, voice, vs, channels: db.channels.filter(c => can(w.key, c))
   }));
 }
 
@@ -111,6 +115,13 @@ function handle(w, m) {
     }
     case 'leave': w.voice = null; push(); break;
     case 'sig': { const p = live().find(x => x.key === m.to && x.voice && x.voice === w.voice); p && send(p, { t: 'sig', from: k, data: m.data }); break; }
+    case 'vs': w.m = !!m.m; w.d = !!m.d; push(); break;
+    case 'setname': {
+      const name = String(m.name || '').trim().replace(/\s+/g, ' '), l = name.toLowerCase();
+      if (!/^[\w .-]{3,20}$/.test(name)) return send(w, { t: 'error', msg: 'Name: 3-20 letters, numbers, spaces, . _ -' });
+      if (Object.entries(db.users).some(([key, x]) => key !== k && (key === l || x.name.toLowerCase() === l))) return send(w, { t: 'error', msg: 'That name is already taken' });
+      u.name = name; done(); break;
+    }
     case 'avatar':
       if (typeof m.data === 'string' && m.data.startsWith('data:image/jpeg;base64,') && m.data.length < 100000) { u.avatar = m.data; u.av = Date.now(); done(); }
       break;
