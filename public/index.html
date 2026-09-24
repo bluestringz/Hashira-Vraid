@@ -837,23 +837,48 @@ async function toggleCam(){
   if(!vc)return;
   if(camS)return stopVideo('cam');
   let s;
-  try{s=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:960},height:{ideal:540},frameRate:{ideal:24}}})}
+  try{s=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640,max:960},height:{ideal:360,max:540},frameRate:{ideal:24,max:24}}})}
   catch{return toast('Could not open the camera. Check the browser permission.')}
   if(!vc){s.getTracks().forEach(t=>t.stop());return}
   camS=s;startVideo('cam',s);
 }
-async function toggleScreen(){
+// Screen share quality, like Discord's picker. Every viewer gets their own copy (no media server), so the sizes stay modest.
+const SQ={
+  smooth:{label:'Smooth: games and videos (720p, 30 fps)',w:1280,h:720,fps:30,hint:'motion',kbps:1500},
+  balanced:{label:'Balanced (720p, 15 fps)',w:1280,h:720,fps:15,hint:'detail',kbps:1000},
+  text:{label:'Sharp text: documents and code (1080p, 5 fps)',w:1920,h:1080,fps:5,hint:'text',kbps:1000}};
+let scrQ='balanced';try{scrQ=SQ[localStorage.sq]?localStorage.sq:'balanced'}catch{}
+function toggleScreen(){
   if(!vc)return;
   if(scrS)return stopVideo('scr');
-  let s;
-  try{s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:30}},audio:false})}
+  const bs=Object.entries(SQ).map(([k,q])=>{const b=E('button',k==scrQ?'p':'',q.label);b.onclick=()=>{close();scrQ=k;try{localStorage.sq=k}catch{};startScreen()};return b});   // the click also lets the browser open its picker
+  modal('Share screen',E('small',0,'Pick a quality. If it lags, choose Balanced or Sharp text.'),...bs);
+}
+async function startScreen(){
+  const q=SQ[scrQ];let s;
+  try{s=await navigator.mediaDevices.getDisplayMedia({video:{width:{max:q.w},height:{max:q.h},frameRate:{ideal:q.fps,max:q.fps}},audio:false})}
   catch{return}   // picker cancelled
   if(!vc){s.getTracks().forEach(t=>t.stop());return}
   scrS=s;startVideo('scr',s);
 }
+// Keep video within what an ordinary home connection can upload: split an upload budget across everyone watching.
+function tuneVideo(){
+  const peers=Object.values(pcs),n=Math.max(1,peers.length);
+  peers.forEach(pc=>pc.getSenders().forEach(sn=>{
+    const t=sn.track;if(!t||t.kind!='video')return;
+    const scr=scrS&&scrS.getVideoTracks()[0]===t,q=SQ[scrQ];
+    const kbps=scr?Math.max(300,Math.min(q.kbps,Math.round(3000/n))):Math.max(150,Math.min(600,Math.round(1200/n)));
+    try{
+      const p=sn.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];
+      p.encodings[0].maxBitrate=kbps*1000;if(scr)p.encodings[0].maxFramerate=q.fps;
+      p.degradationPreference=scr&&q.hint!='motion'?'maintain-resolution':'maintain-framerate';
+      sn.setParameters(p).catch(()=>{});
+    }catch{}
+  }));
+}
 function startVideo(kind,s){
-  const t=s.getVideoTracks()[0];t.contentHint=kind=='scr'?'detail':'motion';t.onended=()=>stopVideo(kind);   // onended: the browser's own "Stop sharing" button
-  Object.values(pcs).forEach(pc=>addVideo(pc,s));
+  const t=s.getVideoTracks()[0];t.contentHint=kind=='scr'?SQ[scrQ].hint:'motion';t.onended=()=>stopVideo(kind);   // onended: the browser's own "Stop sharing" button
+  Object.values(pcs).forEach(pc=>addVideo(pc,s));setTimeout(tuneVideo,1500);
   sendVS();if(cur&&cur.type=='voice')panel();
 }
 function addVideo(pc,s){s.getVideoTracks().forEach(t=>{try{pc._snd.set(s.id,pc.addTrack(t,s))}catch{}})}
@@ -969,7 +994,7 @@ function leaveVoice(quiet){
   vc=null;if(S&&cur)render();
 }
 function closePeer(k){stopRelay(k);delete pcSince[k];if(pcs[k]){clearTimeout(pcs[k]._ct);clearTimeout(pcs[k]._ft);clearTimeout(pcs[k]._gt)}unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
-function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
+function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)});if(camS||scrS)setTimeout(tuneVideo,1500)}   // more or fewer viewers: re-split the upload
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:ICE.iceServers});pcs[k]=pc;
   // If the connection fails or drops: retry, and as a last resort send everything through the relay.
@@ -988,7 +1013,7 @@ function mk(k,init){
     else if(!pcSince[k]){pcSince[k]=Date.now();clearTimeout(pc._gt);pc._gt=setTimeout(()=>{if(pcs[k]===pc&&cur&&cur.type=='voice')panel()},GRACE+100)}   // show the status only if it is still not connected by then
     if(s=='failed'){heal();clearTimeout(pc._ft);pc._ft=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='failed')startRelay(k)},ICE.relay?6000:1500)}
     if(s=='disconnected'){clearTimeout(pc._dt);pc._dt=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='disconnected')heal()},4000)}
-    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k)}   // the direct call works again: stop the backup
+    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k);if(camS||scrS)tuneVideo()}   // the direct call works again: stop the backup
     if(cur&&cur.type=='voice')panel();
   };
   pc.onconnectionstatechange=st;pc.oniceconnectionstatechange=st;
