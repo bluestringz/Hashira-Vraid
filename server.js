@@ -71,7 +71,12 @@ function seedAdmin() {
     if (!Array.isArray(u.roles)) u.roles = u.role && u.role !== 'default' ? [u.role] : [];
     delete u.role;
   }
-  db.channels.forEach(c => { if (!Array.isArray(c.roles)) c.roles = []; });   // roles allowed into a channel (empty = the older open/private rule)
+  db.channels.forEach(c => { if (!Array.isArray(c.roles)) c.roles = []; });
+  for (const [id, r] of Object.entries(db.roles)) {   // repair any role saved in an older/odd shape so it can never break the member list
+    if (!r || typeof r !== 'object') { delete db.roles[id]; continue; }
+    r.name = String(r.name || id); r.perms = Array.isArray(r.perms) ? r.perms.filter(p => ALL.includes(p)) : [];
+    if (!/^#[0-9a-f]{6}$/i.test(r.color || '')) r.color = '#888888';
+  }   // roles allowed into a channel (empty = the older open/private rule)
   save();
   if (!U(AU) || process.env.ADMIN_PASS) {
     db.users[AU] = { ...(U(AU) || { name: AU }), roles: ['admin'], pass: hash(process.env.ADMIN_PASS || '@Qaz123qaz') };
@@ -119,9 +124,11 @@ async function getIce() {
   return iceCache;
 }
 app.get('/api/ice', async (req, res) => {
-  if (!db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]) return res.sendStatus(401);
-  const c = await getIce();
-  res.json({ iceServers: c.servers, relay: c.relay });
+  try {
+    if (!db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]) return res.sendStatus(401);
+    const c = await getIce();
+    res.json({ iceServers: c.servers, relay: c.relay });
+  } catch (e) { console.error('[ice]', e); res.status(500).json({ error: 'ice failed' }); }
 });
 
 app.post('/api/auth', (req, res) => {
@@ -149,9 +156,10 @@ const send = (w, o) => w.readyState === 1 && w.send(JSON.stringify(o));
 const live = () => [...wss.clients].filter(w => w.key);
 const isAdm = k => db.users[k].roles.includes('admin');
 const eff = k => (isAdm(k) ? ['admin'] : ['default', ...db.users[k].roles.filter(r => Object.hasOwn(db.roles, r))]);   // every role the user has (Default always)
-const P = k => (isAdm(k) ? ALL : [...new Set(eff(k).flatMap(r => db.roles[r].perms))]);   // permissions add up across roles
-const roleName = id => (id === 'admin' ? 'Admin' : db.roles[id] ? db.roles[id].name : id);
-const rank = id => (id === 'admin' ? 1e3 : id === 'default' ? -1 : db.roles[id] ? db.roles[id].perms.length : 0);
+const perms = id => (db.roles[id] && Array.isArray(db.roles[id].perms) ? db.roles[id].perms : []);
+const P = k => (isAdm(k) ? ALL : [...new Set(eff(k).flatMap(perms))]);   // permissions add up across roles
+const roleName = id => String(id === 'admin' ? 'Admin' : (db.roles[id] && db.roles[id].name) || id);
+const rank = id => (id === 'admin' ? 1e3 : id === 'default' ? -1 : perms(id).length);
 const primary = k => eff(k).slice().sort((a, b) => rank(b) - rank(a) || roleName(a).localeCompare(roleName(b)))[0];   // the role shown in lists and tags
 const chan = id => db.channels.find(c => c.id === id);
 // Who can see/enter a channel: admins always; if the channel lists roles, only people with one of them; otherwise open, or the "private" permission.
@@ -164,10 +172,12 @@ const can = (k, c) => {
 const cleanRoles = a => [...new Set((Array.isArray(a) ? a : []).filter(r => typeof r === 'string' && r !== 'admin' && r !== 'default' && Object.hasOwn(db.roles, r)))];
 
 // Move a socket in/out of a voice channel and tell the others in that channel (used for the join/leave sounds).
-function setVoice(w, ch) {
+function setVoice(w, ch, why) {
   const old = w.voice;
   if (old === ch) return;
   w.voice = ch;
+  if (ch) console.log('[voice]', new Date().toISOString(), w.key, 'joined', ch);
+  else if (old) console.log('[voice]', new Date().toISOString(), w.key, 'left', old, '-', why || 'unknown');   // shows up in the Render logs
   if (!ch) { w.cam = null; w.scr = null; }
   live().forEach(x => {
     if (x === w) return;
@@ -179,12 +189,12 @@ function setVoice(w, ch) {
 // One session per account: sign out every other socket of this user (code 4004 = logged in elsewhere).
 function dropSockets(k) {
   const old = live().filter(x => x.key === k);
-  old.forEach(x => { setVoice(x, null); x.key = null; x.close(4004); });
+  old.forEach(x => { setVoice(x, null, 'signed in somewhere else'); x.key = null; x.close(4004); });
   if (old.length) push();
 }
 
 function push() {
-  live().forEach(w => { if (w.voice && !can(w.key, chan(w.voice))) { setVoice(w, null); send(w, { t: 'kicked' }); } });
+  live().forEach(w => { if (w.voice && !can(w.key, chan(w.voice))) { setVoice(w, null, 'no access to the channel'); send(w, { t: 'kicked' }); } });
   const voice = {}, vs = {};
   live().forEach(w => {
     if (!w.voice) return;
@@ -195,20 +205,49 @@ function push() {
     key, name: u.name, role: primary(key), roles: u.roles, av: u.av || 0, banned: !!db.banned[key], on: live().some(w => w.key === key)
   }));
   const roles = { admin: { name: 'Admin', color: '#b8860b', perms: ALL }, ...db.roles };
-  live().forEach(w => send(w, {
-    t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-    roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c))
-  }));
+  live().forEach(w => {
+    try {
+      send(w, {
+        t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c))
+      });
+    } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
+  });
 }
 
+// Heartbeat: browsers answer pings by themselves. It keeps proxies from cutting quiet connections and
+// removes half-dead sockets quickly, so nobody stays "online" or "in voice" after their connection is gone.
+const heartbeat = setInterval(() => {
+  wss.clients.forEach(w => { if (w.isAlive === false) return w.terminate(); w.isAlive = false; try { w.ping(); } catch {} });
+}, 25000);
+wss.on('close', () => clearInterval(heartbeat));
+
 wss.on('connection', (w, req) => {
-  const k = db.sessions[new URL(req.url, 'http://x').searchParams.get('token')];
-  if (!k || !U(k)) return w.close(4001);
-  if (db.banned[k]) return w.close(4003);
-  dropSockets(k);   // newest connection wins, so the same account can't be online twice
-  w.key = k; w.voice = null; push();
-  w.on('message', raw => { try { handle(w, JSON.parse(raw)); } catch (e) { console.log(e.message); } });
-  w.on('close', () => { setVoice(w, null); w.key = null; push(); });
+  w.isAlive = true;
+  w.on('pong', () => { w.isAlive = true; });
+  w.on('error', e => console.log('[ws] error', e.message));   // without this listener a socket error can crash the whole server
+  w.on('close', code => {
+    try {
+      const k = w.key;
+      if (!k) return;
+      setVoice(w, null, 'connection closed (' + code + ')');
+      w.key = null;
+      console.log('[ws] closed', k, code);
+      push();
+    } catch (e) { console.error('[ws] close handler failed:', e); }
+  });
+  try {
+    const k = db.sessions[new URL(req.url, 'http://x').searchParams.get('token')];
+    if (!k || !U(k)) return w.close(4001);
+    if (db.banned[k]) return w.close(4003);
+    dropSockets(k);   // newest connection wins, so the same account can't be online twice
+    w.key = k; w.voice = null; push();
+    w.on('message', raw => {
+      w.isAlive = true;
+      let m; try { m = JSON.parse(raw); } catch { return; }
+      try { handle(w, m); } catch (e) { console.error('[msg]', w.key, m && m.t, 'failed:', e); }
+    });
+  } catch (e) { console.error('[ws] connection failed:', e); try { w.close(1011); } catch {} }
 });
 
 function handle(w, m) {
@@ -232,7 +271,8 @@ function handle(w, m) {
       send(w, { t: 'peers', peers: live().filter(x => x !== w && x.voice === c.id).map(x => x.key) });
       push(); break;
     }
-    case 'leave': setVoice(w, null); push(); break;
+    case 'ping': break;   // client keep-alive
+    case 'leave': setVoice(w, null, 'left by request'); push(); break;
     case 'sig': { const p = live().find(x => x.key === m.to && x.voice && x.voice === w.voice); p && send(p, { t: 'sig', from: k, data: m.data }); break; }
     case 'vs':
       w.m = !!m.m; w.d = !!m.d;
@@ -377,11 +417,15 @@ function handle(w, m) {
     }
     case 'vkick': {
       if (!has('disconnect') || !okTarget(m.key)) break;
-      live().filter(x => x.key === m.key && x.voice).forEach(x => { setVoice(x, null); send(x, { t: 'kicked', by: 1 }); });
+      live().filter(x => x.key === m.key && x.voice).forEach(x => { setVoice(x, null, 'disconnected by a moderator'); send(x, { t: 'kicked', by: 1 }); });
       push(); break;
     }
   }
 }
+
+// A stray error must never take the whole server down (that would drop everybody out of voice at once).
+process.on('uncaughtException', e => console.error('[uncaught]', e));
+process.on('unhandledRejection', e => console.error('[unhandled]', e));
 
 async function boot() {
   try { await load(); }
