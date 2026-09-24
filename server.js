@@ -250,7 +250,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c))
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key)
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -304,12 +304,31 @@ function relayAudio(w, raw) {
   live().forEach(x => { if (x !== w && w.rset.has(x.key) && x.voice === w.voice && x.bufferedAmount < 256e3) x.send(out, { binary: true }); });
 }
 
+// Unread counts per text channel, like Discord. Each account keeps the time it last viewed each channel.
+// A channel seen for the first time counts as read, so new members don't start with a pile of old messages.
+function unreadFor(k) {
+  const u = U(k), out = {};
+  if (!u) return out;
+  const read = u.read || (u.read = {});
+  let changed = false;
+  db.channels.forEach(c => {
+    if (c.type !== 'text' || !can(k, c)) return;
+    if (read[c.id] == null) { read[c.id] = Date.now(); changed = true; return; }
+    const n = (db.msgs[c.id] || []).filter(x => x.ts > read[c.id] && x.key !== k).length;
+    if (n) out[c.id] = n;
+  });
+  if (changed) save();
+  return out;
+}
+const markRead = (k, id) => { const u = U(k), c = chan(id); if (u && c && can(k, c)) { (u.read || (u.read = {}))[c.id] = Date.now(); save(); } };
+
 function handle(w, m) {
   const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p);
   const okTarget = t => t && t !== k && U(t) && !isAdm(t) && (adm || !P(t).some(p => STAFF.includes(p)));
   const done = () => { save(); push(); };
   switch (m.t) {
-    case 'open': { const c = chan(m.ch); if (can(k, c)) send(w, { t: 'history', ch: c.id, msgs: db.msgs[c.id] || [] }); break; }
+    case 'open': { const c = chan(m.ch); if (can(k, c)) { markRead(k, c.id); send(w, { t: 'history', ch: c.id, msgs: db.msgs[c.id] || [] }); } break; }
+    case 'read': markRead(k, m.ch); break;   // saw new messages while the channel was open
     case 'chat': {
       const c = chan(m.ch), text = String(m.text || '').trim().slice(0, 500);
       if (!can(k, c) || !text) break;
