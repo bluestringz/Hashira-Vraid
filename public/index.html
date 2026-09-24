@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fil"><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hashira VRaid</title>
 <link rel="icon" href="/logo.png">
@@ -71,7 +71,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
   <input id="u" placeholder="Username" autocomplete="username">
   <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
   <div id="err"></div>
-  <div class="row"><button class="p" type="submit">Login</button><button type="button" onclick="auth('register')">Gumawa ng account</button></div>
+  <div class="row"><button class="p" type="submit">Login</button><button type="button" onclick="auth('register')">Create account</button></div>
 </form></div>
 
 <div id="app" class="hide">
@@ -83,7 +83,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
   <main>
     <div id="top"><h2 id="title"></h2></div>
     <div id="msgs"></div>
-    <form id="send"><input id="txt" placeholder="Mag-type ng message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
+    <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
   </main>
   <aside id="mem"><div class="hd"><b class="brand">Members</b></div><div class="list" id="mlist"></div></aside>
@@ -112,7 +112,7 @@ function connect(){
     if(e.code>=4000){
       delete localStorage.tk;tok=null;S=null;
       $('#app').classList.add('hide');$('#login').classList.remove('hide');
-      $('#err').textContent=e.code==4002?'Na-kick ka. Pwede kang mag-login ulit.':e.code==4003?'Naka-ban ang account na ito.':'';
+      $('#err').textContent=e.code==4002?'You were kicked. You can log in again.':e.code==4003?'This account is banned.':'';
     }else setTimeout(connect,2000);
   };
 }
@@ -156,20 +156,20 @@ function render(){
   const me=S.me,P=p=>me.perms.includes(p),L=$('#chl');L.replaceChildren();
   [['voice','Voice channels'],['text','Text channels']].forEach(([ty,lab])=>{
     const s=E('div','sec');s.append(E('span',0,lab));
-    if(P('channels')){const b=E('button','x','+');b.title='Gumawa ng channel';b.onclick=()=>newCh(ty);s.append(b)}
+    if(P('channels')){const b=E('button','x','+');b.title='Create channel';b.onclick=()=>newCh(ty);s.append(b)}
     L.append(s);
     S.channels.filter(c=>c.type==ty).forEach(c=>{
       const d=E('div','ch'+(cur&&cur.id==c.id?' on':''));
       d.append(E('span',0,(ty=='voice'?'🔊 ':'# ')+c.name+(c.open?'':' 🔒')));
-      if(P('channels')){const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('Bagong pangalan ng channel',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b)}
-      if(me.role=='admin'&&c.id!='open'){const b=E('button','x','🗑');b.title='Delete';b.onclick=e=>{e.stopPropagation();confirm('I-delete ang "'+c.name+'"?')&&tx({t:'delch',id:c.id})};d.append(b)}
+      if(P('channels')){const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b)}
+      if(me.role=='admin'&&c.id!='open'){const b=E('button','x','🗑');b.title='Delete';b.onclick=e=>{e.stopPropagation();confirm('Delete "'+c.name+'"?')&&tx({t:'delch',id:c.id})};d.append(b)}
       d.onclick=()=>pick(c);L.append(d);
       (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.append(avEl(k,u.name),E('span',0,u.name));L.append(v)});
     });
   });
   // my footer
   const f=$('#me'),mu=S.users.find(x=>x.key==me.key);f.replaceChildren();
-  const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Palitan ang profile picture';a.onclick=()=>$('#file').click();
+  const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Change profile picture';a.onclick=()=>$('#file').click();
   const nm=E('b',0,mu.name);
   const th=E('button','x','◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
   f.append(a,nm,tag(me.role),th);
@@ -185,7 +185,7 @@ function render(){
   S.users.slice().sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).forEach(u=>{
     const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
     r.append(avEl(u.key,u.name),E('span',0,u.name+(u.banned?' (ban)':'')),tag(u.role));
-    if(mg){r.title='I-manage';r.onclick=()=>manage(u)}
+    if(mg){r.title='Manage';r.onclick=()=>manage(u)}
     M.append(r);
   });
 }
@@ -197,14 +197,14 @@ function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='adm
 
 function modal(t,...n){
   const m=$('#modal');m.replaceChildren();const d=E('div');d.append(E('h3',0,t),...n);
-  const c=E('button',0,'Isara');c.onclick=()=>m.classList.add('hide');d.append(c);m.append(d);m.classList.remove('hide');
+  const c=E('button',0,'Close');c.onclick=()=>m.classList.add('hide');d.append(c);m.append(d);m.classList.remove('hide');
 }
 $('#modal').onclick=e=>{if(e.target.id=='modal')e.target.classList.add('hide')};
 const close=()=>$('#modal').classList.add('hide');
 
 function newCh(type){
-  const name=prompt('Pangalan ng '+(type=='voice'?'voice':'text')+' channel');if(!name)return;
-  tx({t:'addch',name,type,open:confirm('Open sa lahat ng may account?\nOK = Open   |   Cancel = Private (Verified lang)')});
+  const name=prompt('Name of the new '+(type=='voice'?'voice':'text')+' channel');if(!name)return;
+  tx({t:'addch',name,type,open:confirm('Make this channel open to everyone with an account?\nOK = Open   |   Cancel = Private (Verified and above only)')});
 }
 function manage(u){
   const n=[];
@@ -219,25 +219,25 @@ function manage(u){
     if(kickOk(u)){
       const k=E('button',0,'Kick'),b=E('button','p','Ban');
       k.onclick=()=>{tx({t:'kick',key:u.key});close()};
-      b.onclick=()=>{if(confirm('I-ban si '+u.name+'?')){tx({t:'ban',key:u.key});close()}};
+      b.onclick=()=>{if(confirm('Ban '+u.name+'?')){tx({t:'ban',key:u.key});close()}};
       n.push(k,b);
     }
   }
   modal(u.name,...n);
 }
-const PL={channels:'Gumawa at mag-rename ng channel',kick:'Kick at Ban ng user',private:'Makita ang private voice/text channels'};
+const PL={channels:'Create and rename channels',kick:'Kick and ban users',private:'See private voice and text channels'};
 function roleRow(id,r){
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
-  nm.value=r.name;nm.placeholder='Pangalan ng role';co.type='color';co.value=r.color;top.append(nm,co);d.append(top);
+  nm.value=r.name;nm.placeholder='Role name';co.type='color';co.value=r.color;top.append(nm,co);d.append(top);
   const ps=Object.entries(PL).map(([k,l])=>{const lb=E('label','cb'),c=E('input');c.type='checkbox';c.checked=r.perms.includes(k);lb.append(c,l);d.append(lb);return[k,c]});
-  const sv=E('button','p',id?'Save':'Gumawa ng role');
+  const sv=E('button','p',id?'Save':'Create role');
   sv.onclick=()=>{tx({t:'role',id,name:nm.value,color:co.value,perms:ps.filter(([,c])=>c.checked).map(([k])=>k)});close()};
   d.append(sv);
-  if(id&&id!='default'){const x=E('button',0,'Delete role');x.onclick=()=>confirm('I-delete ang role na ito? Babalik sa Default ang mga may hawak nito.')&&(tx({t:'delrole',id}),close());d.append(x)}
+  if(id&&id!='default'){const x=E('button',0,'Delete role');x.onclick=()=>confirm('Delete this role? Members who have it go back to Default.')&&(tx({t:'delrole',id}),close());d.append(x)}
   return d;
 }
 function roleModal(){
-  modal('Roles',...Object.entries(S.roles).filter(([i])=>i!='admin').map(([i,r])=>roleRow(i,r)),E('h3',0,'Bagong role'),roleRow('',{name:'',color:'#888888',perms:[]}));
+  modal('Roles',...Object.entries(S.roles).filter(([i])=>i!='admin').map(([i,r])=>roleRow(i,r)),E('h3',0,'New role'),roleRow('',{name:'',color:'#888888',perms:[]}));
 }
 
 $('#file').onchange=e=>{
@@ -254,14 +254,14 @@ $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())t
 function panel(){
   const v=$('#vbox');v.replaceChildren();
   const inV=vc==cur.id,bar=E('div','bar');
-  const j=E('button','p',inV?'Umalis sa voice':'Sumali sa voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
+  const j=E('button','p',inV?'Leave voice':'Join voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
   if(inV){const mb=E('button',0,muted?'Unmute':'Mute');mb.onclick=()=>{muted=!muted;local.getAudioTracks().forEach(t=>t.enabled=!muted);panel()};bar.append(mb)}
   v.append(bar);
   (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.append(avEl(k,u.name,'big'),E('div',0,u.name));v.append(c)});
 }
 async function joinVoice(id){
   try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
-  catch{return alert('Kailangan ng microphone permission at HTTPS.')}
+  catch{return alert('Microphone permission and HTTPS are required.')}
   vc=id;muted=false;tx({t:'join',ch:id});
 }
 function leaveVoice(quiet){
