@@ -751,7 +751,7 @@ function vtile(u,x,used){
 function atile(u){
   const k=u.key,c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));
   const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}
-  if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(volSlider(k),b)}
+  if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(b);c.title='Right-click for volume'}   // volume is in the right-click menu
   const sc=stChip(k);if(sc)c.append(sc);
   return c;
 }
