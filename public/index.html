@@ -77,7 +77,8 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .vgrid .vc{width:auto;padding:14px 8px;background:var(--pan2);border-radius:8px;align-content:center}
 .vt{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;cursor:pointer;transition:box-shadow .1s}
 .vt video{width:100%;height:100%;object-fit:cover;display:block}
-.vt.scr video{object-fit:contain}.vt.mine.cam video{transform:scaleX(-1)}
+.vt.scr video{object-fit:contain}
+.vt .vq{position:absolute;left:8px;top:8px;font-size:12px;padding:2px 6px;background:rgba(0,0,0,.65);color:#fff;border:0;border-radius:5px;width:auto;cursor:pointer}.vt.mine.cam video{transform:scaleX(-1)}
 .vt .vl{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.6);color:#fff;padding:2px 8px;border-radius:5px;font-size:13px}
 .vt.speaking{box-shadow:0 0 0 3px #3ba55d}
 .vt.focus{grid-column:1/-1;aspect-ratio:auto;height:min(70vh,720px)}.vt.focus video{object-fit:contain}
@@ -787,6 +788,12 @@ function vtile(u,x,used){
   if(!v){v=document.createElement('video');v.autoplay=true;v.playsInline=true;v.muted=true;v.srcObject=x.stream;vel[key]=v}
   used.add(key);
   d.append(v,E('div','vl',u.name+(x.kind=='scr'?' (screen)':'')));
+  if(x.kind=='scr'&&u.key!=S.me.key){   // viewer's own quality picker for this screen share
+    const sel=E('select','vq');sel.title='Quality for you (depends on your internet)';
+    Object.entries(VQ).forEach(([k2,t])=>{const o=E('option',0,'⚙ '+t);o.value=k2;sel.append(o)});sel.value=vqOf(u.key);
+    ['click','mousedown','pointerdown'].forEach(ev=>sel.addEventListener(ev,e=>e.stopPropagation()));
+    sel.onchange=()=>setVQ(u.key,sel.value);d.append(sel);
+  }
   const sc=stChip(u.key);if(sc){sc.style.cssText='position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.6);padding:2px 6px;border-radius:5px';d.append(sc)}
   d.onclick=()=>{focusT=focusT==x.id?null:x.id;panel()};d.oncontextmenu=e=>userMenu(e,u);
   setTimeout(()=>{const p=v.play&&v.play();p&&p.catch&&p.catch(()=>{})},0);
@@ -844,9 +851,15 @@ async function toggleCam(){
 }
 // Screen share quality, like Discord's picker. Every viewer gets their own copy (no media server), so the sizes stay modest.
 const SQ={
-  smooth:{label:'Smooth: games and videos (720p, 30 fps)',w:1280,h:720,fps:30,hint:'motion',kbps:1500},
-  balanced:{label:'Balanced (720p, 15 fps)',w:1280,h:720,fps:15,hint:'detail',kbps:1000},
-  text:{label:'Sharp text: documents and code (1080p, 5 fps)',w:1920,h:1080,fps:5,hint:'text',kbps:1000}};
+  smooth:{label:'Smooth: games and videos (720p, 30 fps)',w:1280,h:720,fps:30,hint:'motion',kbps:2500},
+  balanced:{label:'Balanced (720p, 15 fps)',w:1280,h:720,fps:15,hint:'detail',kbps:1800},
+  text:{label:'Sharp text: documents and code (1080p, 5 fps)',w:1920,h:1080,fps:5,hint:'text',kbps:1500}};
+// What each viewer can pick for a screen share they watch (the sharer sends every viewer their own copy, so each can differ).
+// Auto: as clear as the connections allow (the browser adapts to the network by itself).
+const VQ={auto:'Auto',high:'High',medium:'Medium',low:'Low (saves data)'};
+const myVQ={};let vqDef='auto';try{vqDef=VQ[localStorage.vq]?localStorage.vq:'auto'}catch{}
+const vqOf=k=>myVQ[k]||vqDef;
+function setVQ(k,v){myVQ[k]=v;vqDef=v;try{localStorage.vq=v}catch{};tx({t:'sig',to:k,data:{vq:v}})}   // tell the sharer what I want
 let scrQ='balanced';try{scrQ=SQ[localStorage.sq]?localStorage.sq:'balanced'}catch{}
 function toggleScreen(){
   if(!vc)return;
@@ -866,11 +879,16 @@ function tuneVideo(){
   const peers=Object.values(pcs),n=Math.max(1,peers.length);
   peers.forEach(pc=>pc.getSenders().forEach(sn=>{
     const t=sn.track;if(!t||t.kind!='video')return;
-    const scr=scrS&&scrS.getVideoTracks()[0]===t,q=SQ[scrQ];
-    const kbps=scr?Math.max(300,Math.min(q.kbps,Math.round(3000/n))):Math.max(150,Math.min(600,Math.round(1200/n)));
+    const scr=scrS&&scrS.getVideoTracks()[0]===t,q=SQ[scrQ],want=pc._vq||'auto';
+    let kbps,scale=1;
+    if(!scr)kbps=Math.max(150,Math.min(600,Math.round(1200/n)));
+    else if(want=='high')kbps=Math.round(q.kbps*1.6);
+    else if(want=='medium')kbps=Math.min(1000,q.kbps);
+    else if(want=='low'){kbps=400;scale=2}
+    else kbps=Math.max(800,Math.min(q.kbps,Math.round(10000/n)));   // auto: share an upload of about 10 Mbps, never below 0.8 Mbps each
     try{
       const p=sn.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];
-      p.encodings[0].maxBitrate=kbps*1000;if(scr)p.encodings[0].maxFramerate=q.fps;
+      p.encodings[0].maxBitrate=kbps*1000;if(scr){p.encodings[0].maxFramerate=q.fps;p.encodings[0].scaleResolutionDownBy=scale}
       p.degradationPreference=scr&&q.hint!='motion'?'maintain-resolution':'maintain-framerate';
       sn.setParameters(p).catch(()=>{});
     }catch{}
@@ -1013,7 +1031,7 @@ function mk(k,init){
     else if(!pcSince[k]){pcSince[k]=Date.now();clearTimeout(pc._gt);pc._gt=setTimeout(()=>{if(pcs[k]===pc&&cur&&cur.type=='voice')panel()},GRACE+100)}   // show the status only if it is still not connected by then
     if(s=='failed'){heal();clearTimeout(pc._ft);pc._ft=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='failed')startRelay(k)},ICE.relay?6000:1500)}
     if(s=='disconnected'){clearTimeout(pc._dt);pc._dt=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='disconnected')heal()},4000)}
-    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k);if(camS||scrS)tuneVideo()}   // the direct call works again: stop the backup
+    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k);if(camS||scrS)tuneVideo();if(vqOf(k)!='auto')tx({t:'sig',to:k,data:{vq:vqOf(k)}})}   // the direct call works again: stop the backup
     if(cur&&cur.type=='voice')panel();
   };
   pc.onconnectionstatechange=st;pc.oniceconnectionstatechange=st;
@@ -1038,6 +1056,7 @@ function mk(k,init){
 function onSig(k,d){
   if(!local)return;
   if(d.relay)return startRelay(k,true);   // the other side switched to backup audio: do the same
+  if(d.vq){if(pcs[k]&&VQ[d.vq]){pcs[k]._vq=d.vq;tuneVideo()}return}   // a viewer picked a quality for my screen share
   const pc=pcs[k]||mk(k,false);
   pc._q=(pc._q||Promise.resolve()).then(()=>handleSig(pc,k,d)).catch(()=>{});   // one message at a time, in order
 }
