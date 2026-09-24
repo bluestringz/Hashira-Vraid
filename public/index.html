@@ -61,6 +61,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .bar{width:100%;display:flex;flex-wrap:wrap;gap:8px}
 .vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
 .vc button{font-size:11px;padding:2px 6px}
+.help.ok{border-color:var(--bd)}
 .lonly{align-self:center;font-size:13px;color:var(--mut);padding:0 6px}
 .lmrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .vol{display:flex;align-items:center;gap:6px;font-size:12px;width:100%}.vol input{flex:1;min-width:0;accent-color:var(--red);border:0;padding:0;margin:0;background:none;box-shadow:none;outline:0;height:auto}
@@ -185,7 +186,8 @@ function connect(){
   const sock=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
   ws=sock;
   sock.onopen=()=>{if(sock===ws)sendVS()};
-  sock.onmessage=e=>{if(sock===ws)on(JSON.parse(e.data))};
+  sock.binaryType='arraybuffer';
+  sock.onmessage=e=>{if(sock!==ws)return;if(typeof e.data!='string')return onBin(e.data);on(JSON.parse(e.data))};
   sock.onclose=e=>{
     if(sock!==ws)return;   // a late close from an old socket must not tear down the live one
     leaveVoice(true);
@@ -461,7 +463,7 @@ let lmute=new Set();try{lmute=new Set(JSON.parse(localStorage.lm||'[]'))}catch{}
 const saveLM=()=>{try{localStorage.lm=JSON.stringify([...lmute])}catch{}};
 let vols={};try{vols=JSON.parse(localStorage.vol||'{}')}catch{}   // per-person volume, only on this device
 const volOf=k=>vols[k]==null?100:vols[k];
-function setVol(k,v){v=Math.max(0,Math.min(100,Math.round(v)));if(v==100)delete vols[k];else vols[k]=v;try{localStorage.vol=JSON.stringify(vols)}catch{};if(auds[k])auds[k].volume=v/100}
+function setVol(k,v){v=Math.max(0,Math.min(100,Math.round(v)));if(v==100)delete vols[k];else vols[k]=v;try{localStorage.vol=JSON.stringify(vols)}catch{};syncAudio()}
 function volSlider(k){
   const w=E('div','vol'),r=E('input'),p=E('span',0,volOf(k)+'%');
   r.type='range';r.min=0;r.max=100;r.step=5;r.value=volOf(k);r.title='Volume for you only';
@@ -475,7 +477,7 @@ const hear=()=>!(deaf||svd());
 const audioMuted=k=>!hear()||peerMuted(k)||lmute.has(k);
 const peerMuted=k=>{const v=S&&S.sv&&S.sv[k];return !!(v&&(v.m||v.d))};   // everyone silences server-muted people, so it holds even if their own app ignores it
 function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!(muted||deaf||svm()||svd()))}
-function syncAudio(){Object.entries(auds).forEach(([k,a])=>{a.muted=audioMuted(k);a.volume=volOf(k)/100})}
+function syncAudio(){Object.entries(auds).forEach(([k,a])=>{a.muted=audioMuted(k);a.volume=volOf(k)/100});Object.entries(rx).forEach(([k,r])=>r.g.gain.value=audioMuted(k)?0:volOf(k)/100)}
 function setVS(){applyMic();syncAudio();sendVS();render()}
 function toggleMute(){if(vc&&noMic)return toast('No microphone: you are listening only. Plug in a mic or allow it, then pick it in Audio setup.');if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
 function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS()}
@@ -545,7 +547,7 @@ setInterval(()=>{
   for(const k in an){const o=an[k];o.a.getByteTimeDomainData(o.buf);let s=0;
     for(const v of o.buf){const d=(v-128)/128;s+=d*d}
     if(Math.sqrt(s/o.buf.length)>0.03)o.t=now;
-    if(now-o.t<300)sp.add(k)}
+    if(now-o.t<300)sp.add(k.startsWith('r:')?k.slice(2):k)}
   document.querySelectorAll('.vm .av[data-k],.vc .av[data-k],.vt.cam[data-k]').forEach(e=>e.classList.toggle('speaking',sp.has(e.dataset.k)));
 },100);
 
@@ -634,6 +636,7 @@ async function loadIce(force){
 const pcState={};
 function stChip(k){
   if(k==S.me.key||vc!=cur.id)return null;
+  if(relayOn.has(k)){const c=E('small','cst');c.textContent='Via server';c.title='Backup audio through the server: a direct call was not possible';return c}
   const s=pcState[k];if(!s||s=='connected'||s=='completed')return null;
   return E('small','cst'+(s=='failed'?' bad':''),s=='failed'?"Can't connect":'Connecting…');
 }
@@ -668,7 +671,7 @@ async function switchMic(){   // change microphone while in a call
   let s;try{s=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){return micError(e)}
   const t=s.getAudioTracks()[0];
   Object.values(pcs).forEach(pc=>pc.getSenders().forEach(x=>{if(x.track&&x.track.kind=='audio')x.replaceTrack(t).catch(()=>{})}));
-  const old=local;unwatch(S.me.key);local=s;applyMic();watch(S.me.key,local);
+  const old=local;unwatch(S.me.key);local=s;applyMic();watch(S.me.key,local);ensureCap();
   if(old)old.getTracks().forEach(x=>x.stop());
 }
 async function netTest(out){
@@ -768,13 +771,15 @@ function panel(){
   }
   const ab=E('button',0,'Audio setup');ab.onclick=audioSetup;bar.append(ab);
   v.append(bar);
-  const failed=inV?Object.entries(pcState).filter(([k,st])=>st=='failed'&&(S.voice[vc]||[]).includes(k)).map(([k])=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
+  const failed=inV?Object.entries(pcState).filter(([k,st])=>st=='failed'&&!relayOn.has(k)&&(S.voice[vc]||[]).includes(k)).map(([k])=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
   if(failed.length){
     const h=E('div','help');h.append(E('b',0,"Can't connect the audio with "+failed.join(', ')+'.'));
     h.append(E('small',0,ICE.relay?'The app already tried the relay. Ask them to open Audio setup and run the connection test.':"Their network or browser is blocking direct calls. The server admin needs to add a relay (TURN)."));
     if(isBrave)h.append(E('small',0,'Brave: open brave://settings, search "WebRTC", set "WebRTC IP handling policy" to "Default public interface only", then reload the page.'));
     const b=E('button',0,'Audio setup and connection test');b.onclick=audioSetup;h.append(b);v.append(h);
   }
+  const viaSrv=inV?[...relayOn].filter(k=>(S.voice[vc]||[]).includes(k)).map(k=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
+  if(viaSrv.length){const h=E('div','help ok');h.append(E('small',0,'🔁 Voice with '+viaSrv.join(', ')+' goes through the server (a direct call was blocked by their network). It may have a small delay. Camera and screen share do not work with them this way.'));v.append(h)}
   const grid=E('div','vgrid'),used=new Set();
   (S.voice[cur.id]||[]).forEach(k=>{
     const u=S.users.find(x=>x.key==k);if(!u)return;
@@ -818,6 +823,69 @@ function stopVideo(kind){
   killVideo(kind);sendVS();if(cur&&cur.type=='voice')panel();
 }
 
+/* ---------- Backup audio through the server ----------
+   When a direct call with someone cannot connect (their network blocks it and no TURN relay helps),
+   our voices are sent to each other through the server instead: 16 kHz, µ-law (8 bits per sample), silence skipped. */
+const RR=16000,relayOn=new Set(),rx={};let cap=null;
+function mulaw(x){let s=Math.round(Math.max(-1,Math.min(1,x))*32635);const sg=s<0?0x80:0;if(s<0)s=-s;s+=132;let e=7;for(let m=0x4000;!(s&m)&&e>0;e--,m>>=1);return ~(sg|(e<<4)|((s>>(e+3))&15))&255}
+const ULAW=new Float32Array(256).map((_,u)=>{u=~u&255;const e=(u>>4)&7;let s=((((u&15)<<3)+132)<<e)-132;return (u&0x80?-s:s)/32768});
+function relayTell(){tx({t:'rset',to:[...relayOn]})}
+function startRelay(k,fromPeer){
+  if(!vc||relayOn.has(k)||!S||!(S.voice[vc]||[]).includes(k))return;
+  relayOn.add(k);relayTell();
+  if(!fromPeer)tx({t:'sig',to:k,data:{relay:1}});
+  ensureCap();if(cur&&cur.type=='voice')panel();
+}
+function stopRelay(k){
+  if(!relayOn.delete(k))return;
+  relayTell();const r=rx[k];if(r){try{r.g.disconnect()}catch{}delete rx[k]}delete an['r:'+k];
+  if(!relayOn.size)stopCap();
+  if(cur&&cur.type=='voice')panel();
+}
+function stopCap(){if(cap){try{cap.src.disconnect();cap.sp.disconnect()}catch{}cap=null}}
+function ensureCap(){   // send my microphone to the people on backup audio
+  if(!relayOn.size||!local||!local.getAudioTracks().length){stopCap();return}
+  if(cap&&cap.stream===local)return;
+  stopCap();
+  try{
+    actx=actx||new(window.AudioContext||window.webkitAudioContext)();actx.resume();
+    const src=actx.createMediaStreamSource(local),sp=actx.createScriptProcessor(2048,1,1),ratio=actx.sampleRate/RR;
+    let pos=0,lastLoud=0;
+    sp.onaudioprocess=e=>{
+      e.outputBuffer.getChannelData(0).fill(0);
+      const inp=e.inputBuffer.getChannelData(0),n=Math.floor((inp.length-pos)/ratio);
+      if(n<=0)return;
+      const out=new Uint8Array(n);let loud=false;
+      for(let i=0;i<n;i++){   // average the samples that fall into each output sample (a simple low-pass)
+        const a=Math.floor(pos+i*ratio),b=Math.max(a+1,Math.floor(pos+(i+1)*ratio));let sum=0;
+        for(let j=a;j<b&&j<inp.length;j++)sum+=inp[j];
+        const x=sum/(b-a);if(x>0.008||x<-0.008)loud=true;out[i]=mulaw(x);
+      }
+      pos=pos+n*ratio-inp.length;
+      const now=performance.now();if(loud)lastLoud=now;
+      if(now-lastLoud>400)return;   // silence: send nothing
+      if(!relayOn.size||muted||deaf||svm()||svd()||!ws||ws.readyState!==1||ws.bufferedAmount>64e3)return;
+      ws.send(out);
+    };
+    src.connect(sp);sp.connect(actx.destination);   // the processor only runs when connected; it outputs silence
+    cap={stream:local,src,sp};
+  }catch(e){console.warn('backup audio capture failed',e)}
+}
+function onBin(buf){   // backup audio from someone: [key length][key][µ-law samples]
+  const b=new Uint8Array(buf),kl=b[0],k=new TextDecoder().decode(b.subarray(1,1+kl)),p=b.subarray(1+kl);
+  if(!vc||!relayOn.has(k)||!p.length)return;
+  try{actx=actx||new(window.AudioContext||window.webkitAudioContext)()}catch{return}
+  if(actx.state!='running'){actx.resume();$('#sndfix').classList.remove('hide')}
+  let r=rx[k];
+  if(!r){const g=actx.createGain(),a=actx.createAnalyser();a.fftSize=512;g.connect(a);g.connect(actx.destination);r=rx[k]={g,next:0};an['r:'+k]={a,src:g,buf:new Uint8Array(512),t:0}}
+  r.g.gain.value=audioMuted(k)?0:volOf(k)/100;
+  const ab=actx.createBuffer(1,p.length,RR),ch=ab.getChannelData(0);for(let i=0;i<p.length;i++)ch[i]=ULAW[p[i]];
+  const now=actx.currentTime;
+  if(r.next<now+0.02)r.next=now+0.12;   // (re)start with a small buffer to smooth out network jitter
+  else if(r.next>now+0.6)return;       // fell too far behind: skip to catch up
+  const s=actx.createBufferSource();s.buffer=ab;s.connect(r.g);s.start(r.next);r.next+=ab.duration;
+}
+
 /* ---------- Voice connections (WebRTC mesh, best for small groups) ---------- */
 async function joinVoice(id){
   if(joining)return;
@@ -852,17 +920,18 @@ function reconcile(){   // keep this app and the server in agreement about who i
 function leaveVoice(quiet){
   if(!quiet)want(null);
   Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
-  ['cam','scr'].forEach(killVideo);
+  ['cam','scr'].forEach(killVideo);stopCap();
   if(local)local.getTracks().forEach(t=>t.stop());
   local=null;noMic=false;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
-function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function closePeer(k){stopRelay(k);if(pcs[k]){clearTimeout(pcs[k]._ct);clearTimeout(pcs[k]._ft)}unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
 function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:ICE.iceServers});pcs[k]=pc;
   // If the connection fails or drops: retry, and as a last resort send everything through the relay.
   pc._tries=0;pc._rst=false;
+  pc._ct=setTimeout(()=>{if(pcs[k]===pc&&!['connected','completed'].includes(pcState[k]))startRelay(k)},10000);   // still not connected: use backup audio
   const heal=()=>{
     if(pcs[k]!==pc||pc._tries>=2)return;
     pc._tries++;
@@ -872,9 +941,9 @@ function mk(k,init){
   };
   const st=()=>{
     const s=pc.connectionState||pc.iceConnectionState;pcState[k]=s;
-    if(s=='failed')heal();
+    if(s=='failed'){heal();clearTimeout(pc._ft);pc._ft=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='failed')startRelay(k)},ICE.relay?6000:1500)}
     if(s=='disconnected'){clearTimeout(pc._dt);pc._dt=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='disconnected')heal()},4000)}
-    if(s=='connected'||s=='completed')pc._tries=0;
+    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k)}   // the direct call works again: stop the backup
     if(cur&&cur.type=='voice')panel();
   };
   pc.onconnectionstatechange=st;pc.oniceconnectionstatechange=st;
@@ -898,6 +967,7 @@ function mk(k,init){
 }
 function onSig(k,d){
   if(!local)return;
+  if(d.relay)return startRelay(k,true);   // the other side switched to backup audio: do the same
   const pc=pcs[k]||mk(k,false);
   pc._q=(pc._q||Promise.resolve()).then(()=>handleSig(pc,k,d)).catch(()=>{});   // one message at a time, in order
 }
