@@ -608,7 +608,7 @@ function userMenu(e,u){
   const vi=voiceItems(u);if(vi.length)it.push(null,...vi);
   if(it.length>1)ctx(e,it);
 }
-const unlock=()=>{try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state!='running')actx.resume()}catch{}playAll()};
+const unlock=()=>{try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state!='running')actx.resume();if(nsCtx&&nsCtx.state!='running')nsCtx.resume()}catch{}playAll()};
 ['click','keydown','touchstart'].forEach(ev=>addEventListener(ev,unlock,{passive:true}));
 // Optional: put your own join.mp3 and leave.mp3 in public/sounds/ and they are used instead of the built-in tones.
 const sfx={};
@@ -633,17 +633,53 @@ async function loadIce(force){
   if(!force&&Date.now()-ICE.at<3600e3)return;
   try{const r=await fetch('/api/ice',{headers:{Authorization:'Bearer '+tok}});if(r.ok){ICE=await r.json();ICE.at=Date.now()}}catch{}
 }
-const pcState={};
+const pcState={},pcSince={};   // pcSince: when this connection stopped being connected (or started trying)
+const GRACE=5000;   // like Discord: say nothing about a connection that is only a few seconds old or briefly hiccuping
+const slow=k=>pcSince[k]&&Date.now()-pcSince[k]>GRACE;
 function stChip(k){
   if(k==S.me.key||vc!=cur.id)return null;
   if(relayOn.has(k)){const c=E('small','cst');c.textContent='Via server';c.title='Backup audio through the server: a direct call was not possible';return c}
-  const s=pcState[k];if(!s||s=='connected'||s=='completed')return null;
+  const s=pcState[k];if(!s||s=='connected'||s=='completed'||!slow(k))return null;
   return E('small','cst'+(s=='failed'?' bad':''),s=='failed'?"Can't connect":'Connecting…');
 }
-const pref={mic:'',spk:''};try{pref.mic=localStorage.mic||'';pref.spk=localStorage.spk||''}catch{}
-const savePref=()=>{try{localStorage.mic=pref.mic;localStorage.spk=pref.spk}catch{}};
+const pref={mic:'',spk:'',ns:'strong'};try{pref.mic=localStorage.mic||'';pref.spk=localStorage.spk||'';pref.ns=localStorage.ns||'strong'}catch{}
+const savePref=()=>{try{localStorage.mic=pref.mic;localStorage.spk=pref.spk;localStorage.ns=pref.ns}catch{}};
 let isBrave=false;try{navigator.brave&&navigator.brave.isBrave().then(v=>isBrave=!!v)}catch{}
-const micConstraints=()=>({audio:Object.assign({echoCancellation:true,noiseSuppression:true,autoGainControl:true},pref.mic?{deviceId:{ideal:pref.mic}}:{})});
+// "Standard" = the browser's own noise suppression. "Strong" = the browser's plus RNNoise (below), like Discord's Krisp.
+const micConstraints=()=>({audio:Object.assign({echoCancellation:true,noiseSuppression:pref.ns!='off',autoGainControl:true,channelCount:{ideal:1}},pref.mic?{deviceId:{ideal:pref.mic}}:{})});
+
+/* ---------- Strong noise suppression (RNNoise, runs in the browser; files in public/ns/, MIT licence) ----------
+   Removes keyboard, fan, traffic, dogs and other background noise from your microphone before it is sent. */
+let nsCtx=null,nsWasm=null,nsLoading=null;
+function nsInit(){
+  if(nsLoading)return nsLoading;
+  return nsLoading=(async()=>{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:48000});   // RNNoise works at 48 kHz
+    if(!ctx.audioWorklet)throw new Error('no AudioWorklet');
+    const simd=WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]));
+    const [bin]=await Promise.all([
+      fetch(simd?'/ns/rnnoise_simd.wasm':'/ns/rnnoise.wasm').then(r=>{if(!r.ok)throw new Error('wasm '+r.status);return r.arrayBuffer()}),
+      ctx.audioWorklet.addModule('/ns/rnnoise-worklet.js')]);
+    nsWasm=bin;nsCtx=ctx;return ctx;
+  })().catch(e=>{nsLoading=null;throw e});
+}
+async function cleanMic(raw){   // returns the stream to send: cleaned when "Strong" is on, otherwise the microphone as is
+  if(pref.ns!='strong'||!raw||!raw.getAudioTracks().length)return raw;
+  try{
+    const ctx=await nsInit();
+    if(ctx.state!='running'){ctx.resume();await new Promise(r=>setTimeout(r,300))}
+    if(ctx.state!='running')throw new Error('audio is not unlocked yet');   // e.g. auto-rejoin after a refresh, before any click
+    const src=ctx.createMediaStreamSource(raw),node=new AudioWorkletNode(ctx,'@sapphi-red/web-noise-suppressor/rnnoise',{processorOptions:{maxChannels:1,wasmBinary:nsWasm}}),dst=ctx.createMediaStreamDestination();
+    src.connect(node);node.connect(dst);
+    const out=dst.stream;out._raw=raw;out._ns={src,node};
+    return out;
+  }catch(e){console.warn('Strong noise suppression not available, using the microphone as is:',e&&e.message);return raw}
+}
+function stopMic(s){   // stop a microphone stream, including the raw one behind a cleaned stream
+  if(!s)return;s.getTracks().forEach(t=>t.stop());
+  if(s._raw){s._raw.getTracks().forEach(t=>t.stop());try{s._ns.src.disconnect();s._ns.node.port.postMessage('destroy');s._ns.node.disconnect()}catch{}}
+}
+const nsOn=s=>!!(s&&s._raw);
 function setSink(a){if(pref.spk&&a.setSinkId)a.setSinkId(pref.spk).catch(()=>{})}
 function playAll(){Object.values(auds).forEach(a=>{const p=a.play&&a.play();if(p&&p.then)p.then(()=>$('#sndfix').classList.add('hide')).catch(()=>{})})}
 $('#sndfix').onclick=playAll;
@@ -668,11 +704,11 @@ function toneUrl(){   // a short two-note chime as a WAV file, so the speaker te
 }
 async function switchMic(){   // change microphone while in a call
   if(vc&&noMic){const id=vc;leaveVoice();return joinVoice(id)}   // was listening only: rejoin so the new mic is sent to everyone
-  let s;try{s=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){return micError(e)}
+  let s;try{s=await cleanMic(await navigator.mediaDevices.getUserMedia(micConstraints()))}catch(e){return micError(e)}
   const t=s.getAudioTracks()[0];
   Object.values(pcs).forEach(pc=>pc.getSenders().forEach(x=>{if(x.track&&x.track.kind=='audio')x.replaceTrack(t).catch(()=>{})}));
   const old=local;unwatch(S.me.key);local=s;applyMic();watch(S.me.key,local);ensureCap();
-  if(old)old.getTracks().forEach(x=>x.stop());
+  stopMic(old);
 }
 async function netTest(out){
   out.textContent='Testing your connection…';
@@ -695,11 +731,12 @@ async function netTest(out){
 async function audioSetup(){
   const bar=E('i'),meter=E('div','meter'),status=E('small',0,'Say something…'),msel=E('select'),ssel=E('select'),net=E('div');
   meter.append(bar);net.style.cssText='white-space:pre-wrap;font-size:13px';
-  let stream=null,src=null,an2=null,buf=null,heard=0,t0=Date.now();
-  const stopMeter=()=>{if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;if(src){try{src.disconnect()}catch{}}src=null;an2=null};
+  let stream=null,src=null,an2=null,buf=null,heard=0,t0=Date.now(),me2=null;
+  const hm=E('button',0,'Hear myself');
+  const stopMeter=()=>{stopMic(stream);stream=null;if(me2){me2.srcObject=null;me2=null;hm.textContent='Hear myself'}if(src){try{src.disconnect()}catch{}}src=null;an2=null};
   const startMeter=async()=>{
     stopMeter();heard=0;t0=Date.now();
-    try{stream=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){status.textContent='Cannot open the microphone ('+((e&&e.name)||'error')+'). Check the browser permission for this site.';return}
+    try{stream=await cleanMic(await navigator.mediaDevices.getUserMedia(micConstraints()))}catch(e){status.textContent='Cannot open the microphone ('+((e&&e.name)||'error')+'). Check the browser permission for this site.';return}
     try{unlock();src=actx.createMediaStreamSource(stream);an2=actx.createAnalyser();an2.fftSize=512;buf=new Uint8Array(an2.fftSize);src.connect(an2)}catch{}
   };
   const fill=async()=>{
@@ -711,14 +748,18 @@ async function audioSetup(){
   msel.onchange=async()=>{pref.mic=msel.value;savePref();await startMeter();if(vc&&local)switchMic()};
   const canSink=!!(window.HTMLMediaElement&&HTMLMediaElement.prototype.setSinkId);
   ssel.onchange=()=>{pref.spk=ssel.value;savePref();Object.values(auds).forEach(setSink)};
+  const nsel=E('select');[['strong','Strong (removes keyboard, fan and background noise)'],['standard','Standard (browser)'],['off','Off']].forEach(([v,t])=>{const o=E('option',0,t);o.value=v;nsel.append(o)});nsel.value=pref.ns;
+  const nst=E('small');const nsInfo=()=>{nst.textContent=pref.ns=='strong'?(nsOn(stream)?'✓ Strong noise suppression is on.':'Strong is not available in this browser, so Standard is used.'):''};
+  nsel.onchange=async()=>{pref.ns=nsel.value;savePref();await startMeter();nsInfo();if(vc&&local)switchMic()};
+  hm.onclick=()=>{if(me2){me2.srcObject=null;me2=null;hm.textContent='Hear myself';return}if(!stream)return;me2=new Audio();me2.srcObject=stream;setSink(me2);me2.play().catch(()=>{});hm.textContent='Stop hearing myself'};
   const test=E('button',0,'Play test sound');test.onclick=()=>{const a=new Audio(toneUrl());setSink(a);const p=a.play();p&&p.catch&&p.catch(()=>{})};
   const nb=E('button','p','Run connection test');nb.onclick=()=>netTest(net);
-  const items=[E('label',0,'Microphone'),msel,meter,status,E('label',0,'Speakers'),ssel];
+  const items=[E('label',0,'Microphone'),msel,meter,status,E('label',0,'Noise suppression'),nsel,nst,hm,E('small',0,'Use headphones for "Hear myself", otherwise the speaker feeds back into the mic.'),E('label',0,'Speakers'),ssel];
   if(!canSink){ssel.disabled=true;items.push(E('small',0,'This browser plays sound on the system default speaker. Chrome, Edge and Brave can choose one here.'))}
   items.push(test,E('label',0,'Connection'),nb,net);
   if(isBrave)items.push(E('small',0,'Brave tip: if people cannot hear each other, open brave://settings, search "WebRTC" and set "WebRTC IP handling policy" to "Default public interface only". Also allow the microphone for this site.'));
   modal('Audio setup',...items);
-  await startMeter();await fill();
+  await startMeter();nsInfo();await fill();
   const iv=setInterval(()=>{
     if(!meter.isConnected||$('#modal').classList.contains('hide')){clearInterval(iv);stopMeter();return}
     if(!an2)return;
@@ -771,7 +812,7 @@ function panel(){
   }
   const ab=E('button',0,'Audio setup');ab.onclick=audioSetup;bar.append(ab);
   v.append(bar);
-  const failed=inV?Object.entries(pcState).filter(([k,st])=>st=='failed'&&!relayOn.has(k)&&(S.voice[vc]||[]).includes(k)).map(([k])=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
+  const failed=inV?Object.entries(pcState).filter(([k,st])=>st=='failed'&&!relayOn.has(k)&&slow(k)&&(S.voice[vc]||[]).includes(k)).map(([k])=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
   if(failed.length){
     const h=E('div','help');h.append(E('b',0,"Can't connect the audio with "+failed.join(', ')+'.'));
     h.append(E('small',0,'Their network or browser is blocking a direct call. Switching to backup audio through the server… If this stays for more than a few seconds, ask them to reload the page.'));
@@ -849,7 +890,7 @@ function ensureCap(){   // send my microphone to the people on backup audio
   stopCap();
   try{
     actx=actx||new(window.AudioContext||window.webkitAudioContext)();actx.resume();
-    const src=actx.createMediaStreamSource(local),sp=actx.createScriptProcessor(2048,1,1),ratio=actx.sampleRate/RR;
+    const src=actx.createMediaStreamSource(local),sp=actx.createScriptProcessor(1024,1,1),ratio=actx.sampleRate/RR;
     let pos=0,lastLoud=0;
     sp.onaudioprocess=e=>{
       e.outputBuffer.getChannelData(0).fill(0);
@@ -877,12 +918,14 @@ function onBin(buf){   // backup audio from someone: [key length][key][µ-law sa
   try{actx=actx||new(window.AudioContext||window.webkitAudioContext)()}catch{return}
   if(actx.state!='running'){actx.resume();$('#sndfix').classList.remove('hide')}
   let r=rx[k];
-  if(!r){const g=actx.createGain(),a=actx.createAnalyser();a.fftSize=512;g.connect(a);g.connect(actx.destination);r=rx[k]={g,next:0};an['r:'+k]={a,src:g,buf:new Uint8Array(512),t:0}}
+  if(!r){const g=actx.createGain(),a=actx.createAnalyser();a.fftSize=512;g.connect(a);g.connect(actx.destination);r=rx[k]={g,next:0,buf:.06,at:0};an['r:'+k]={a,src:g,buf:new Uint8Array(512),t:0}}
   r.g.gain.value=audioMuted(k)?0:volOf(k)/100;
   const ab=actx.createBuffer(1,p.length,RR),ch=ab.getChannelData(0);for(let i=0;i<p.length;i++)ch[i]=ULAW[p[i]];
-  const now=actx.currentTime;
-  if(r.next<now+0.02)r.next=now+0.12;   // (re)start with a small buffer to smooth out network jitter
-  else if(r.next>now+0.6)return;       // fell too far behind: skip to catch up
+  // Adaptive jitter buffer: start small (60 ms); if audio runs dry in the middle of talking, keep a bit more (up to 250 ms),
+  // then slowly shrink again while things go smoothly. A pause in talking is not counted as running dry.
+  const now=actx.currentTime,t=performance.now(),talking=t-r.at<250;r.at=t;
+  if(r.next<now+0.01){if(talking)r.buf=Math.min(.25,r.buf+.03);r.next=now+r.buf}
+  else{r.buf=Math.max(.06,r.buf-.0005);if(r.next>now+r.buf+.25)return}   // too far behind: skip this chunk to catch up
   const s=actx.createBufferSource();s.buffer=ab;s.connect(r.g);s.start(r.next);r.next+=ab.duration;
 }
 
@@ -893,7 +936,7 @@ async function joinVoice(id){
   try{
     if(vc)leaveVoice();
     let st;noMic=false;
-    try{st=await navigator.mediaDevices.getUserMedia(micConstraints())}
+    try{st=await cleanMic(await navigator.mediaDevices.getUserMedia(micConstraints()))}
     catch(e){   // no mic, mic blocked, or mic busy: still join, just listening
       st=new MediaStream();noMic=true;
       toast('No microphone available, so you joined listening only. Others cannot hear you.');
@@ -921,11 +964,11 @@ function leaveVoice(quiet){
   if(!quiet)want(null);
   Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
   ['cam','scr'].forEach(killVideo);stopCap();
-  if(local)local.getTracks().forEach(t=>t.stop());
+  stopMic(local);
   local=null;noMic=false;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
-function closePeer(k){stopRelay(k);if(pcs[k]){clearTimeout(pcs[k]._ct);clearTimeout(pcs[k]._ft)}unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function closePeer(k){stopRelay(k);delete pcSince[k];if(pcs[k]){clearTimeout(pcs[k]._ct);clearTimeout(pcs[k]._ft);clearTimeout(pcs[k]._gt)}unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
 function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:ICE.iceServers});pcs[k]=pc;
@@ -940,7 +983,9 @@ function mk(k,init){
     if(pc.restartIce)pc.restartIce();else if(pc.onnegotiationneeded)pc.onnegotiationneeded();
   };
   const st=()=>{
-    const s=pc.connectionState||pc.iceConnectionState;pcState[k]=s;
+    const s=pc.connectionState||pc.iceConnectionState,ok=s=='connected'||s=='completed';pcState[k]=s;
+    if(ok)delete pcSince[k];
+    else if(!pcSince[k]){pcSince[k]=Date.now();clearTimeout(pc._gt);pc._gt=setTimeout(()=>{if(pcs[k]===pc&&cur&&cur.type=='voice')panel()},GRACE+100)}   // show the status only if it is still not connected by then
     if(s=='failed'){heal();clearTimeout(pc._ft);pc._ft=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='failed')startRelay(k)},ICE.relay?6000:1500)}
     if(s=='disconnected'){clearTimeout(pc._dt);pc._dt=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='disconnected')heal()},4000)}
     if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k)}   // the direct call works again: stop the backup
