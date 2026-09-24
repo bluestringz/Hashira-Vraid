@@ -3,6 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Hashira VRaid</title>
 <link rel="icon" href="/logo.png">
+<link rel="manifest" href="/app/manifest.json"><meta name="theme-color" content="#10070b"><link rel="apple-touch-icon" href="/app/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
 <style>
 :root{--red:#e11d2e;--tx:#f3eef0;--mut:#a89aa0;--pan:rgba(16,7,11,.76);--pan2:rgba(255,255,255,.07);--bd:rgba(255,255,255,.13);--ov:rgba(6,2,5,.66);--solid:#1a0b10}
@@ -270,6 +271,18 @@ function addMsg(m){
   b.append(h,E('p',0,m.text));d.append(b);
   const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
 }
+/* ---------- Install as an app (own window, taskbar/desktop icon, no browser bars) ---------- */
+let installEv=null;
+const isApp=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone||/Electron/.test(navigator.userAgent);   // installed web app or the Windows app
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEv=e});   // Chrome/Edge: keep it for our own Install button
+addEventListener('appinstalled',()=>{installEv=null;toast('Installed! Open Hashira VRaid from your desktop or Start menu.')});
+async function installApp(){
+  if(installEv){installEv.prompt();const r=await installEv.userChoice.catch(()=>null);if(r&&r.outcome=='accepted')installEv=null;return}
+  modal('Install the app',E('small',0,'Chrome or Edge on a computer: click the install icon at the right end of the address bar (a small screen with an arrow), or open the ⋮ menu and choose "Install Hashira VRaid" / "Apps > Install this site as an app".'),
+    E('small',0,'Android (Chrome): ⋮ menu > "Add to Home screen" or "Install app".'),
+    E('small',0,'iPhone/iPad (Safari): Share button > "Add to Home Screen".'));
+}
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
 function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
@@ -524,6 +537,10 @@ function settings(){
   const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
   const pic=E('button',0,'Change profile picture');pic.onclick=()=>{close();$('#file').click()};
   const items=[E('label',0,'Display name'),n,E('small',0,'Your login username stays "'+S.me.key+'".'),sv,pic];
+  if(!isApp()){
+    if(S.dl){const dw=E('button','p','Download Windows app');dw.onclick=()=>open(S.dl,'_blank');items.push(dw)}   // link set by the admin in Render (DESKTOP_APP_URL)
+    const ia=E('button',S.dl?'':'p','Install desktop app');ia.onclick=installApp;items.push(ia);
+  }
   const cp=E('button',0,'Change password');cp.onclick=passModal;items.push(cp);
   const au=E('button',0,'Audio setup (microphone, speakers, connection test)');au.onclick=audioSetup;items.push(au);
   items.push(E('label',0,'Muted for me (only you stop hearing them)'));
@@ -993,6 +1010,39 @@ function onBin(buf){   // backup audio from someone: [key length][key][µ-law sa
   const s=actx.createBufferSource();s.buffer=ab;s.connect(r.g);s.start(r.next);r.next+=ab.duration;
 }
 
+/* ---------- Each person's connection is handled on its own ----------
+   Everyone has a separate link to everyone else. These keep one person's slow internet from slowing the others:
+   1. Silence is not sent (Opus DTX): while you are quiet you use almost no data, like Discord.
+   2. Every link measures its own quality. If the link to one person is slow or losing packets, only the voice
+      sent to THAT person gets lighter; everyone else still gets full quality. It goes back up when the link recovers. */
+function lean(desc){   // ask the other side to stop sending during silence and to keep forward error correction on
+  const sdp=desc.sdp.replace(/a=fmtp:(\d+) (.*)\r\n/g,(m,pt,params)=>{
+    if(!new RegExp('a=rtpmap:'+pt+' opus/','i').test(desc.sdp))return m;
+    let p=params;if(!/usedtx=/.test(p))p+=';usedtx=1';if(!/useinbandfec=/.test(p))p+=';useinbandfec=1';
+    return 'a=fmtp:'+pt+' '+p+'\r\n'+(/a=ptime:/.test(desc.sdp)?'':'a=ptime:40\r\n');   // 40 ms packets: half the packets (and half the header overhead) of the default 20 ms, only 20 ms more delay
+  });
+  return {type:desc.type,sdp};
+}
+const linkQ={};   // person -> {kbps, good} : current voice bitrate toward them
+async function tuneLinks(){
+  if(!vc)return;
+  const base=24;   // 24 kbps Opus: clear speech, less than half of Discord's default 64 kbps
+  for(const [k,pc] of Object.entries(pcs)){
+    const sn=pc.getSenders().find(x=>x.track&&x.track.kind=='audio');if(!sn||pc.connectionState!='connected')continue;
+    let loss=0,rtt=0;
+    try{(await pc.getStats(sn.track)).forEach(r=>{if(r.type=='remote-inbound-rtp'&&r.kind=='audio'){loss=r.fractionLost||0;rtt=r.roundTripTime||0}})}catch{continue}
+    const q=linkQ[k]||(linkQ[k]={kbps:base,good:0});
+    const want=rtt>0.6||loss>0.1?12:rtt>0.3||loss>0.03?16:base;
+    if(want<q.kbps){q.kbps=want;q.good=0}                              // worse: step down right away
+    else if(want>q.kbps&&++q.good>=3){q.kbps=Math.min(want,q.kbps+4);q.good=0}   // better for ~12 s: step back up
+    else if(want==q.kbps)q.good=0;
+    if(q.kbps>base)q.kbps=base;
+    try{const p=sn.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];
+      if(p.encodings[0].maxBitrate!==q.kbps*1000){p.encodings[0].maxBitrate=q.kbps*1000;await sn.setParameters(p)}}catch{}
+  }
+}
+setInterval(tuneLinks,4000);
+
 /* ---------- Voice connections (WebRTC mesh, best for small groups) ---------- */
 async function joinVoice(id){
   if(joining)return;
@@ -1032,7 +1082,7 @@ function leaveVoice(quiet){
   local=null;noMic=false;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
-function closePeer(k){stopRelay(k);delete pcSince[k];if(pcs[k]){clearTimeout(pcs[k]._ct);clearTimeout(pcs[k]._ft);clearTimeout(pcs[k]._gt)}unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function closePeer(k){stopRelay(k);delete pcSince[k];delete linkQ[k];if(pcs[k]){clearTimeout(pcs[k]._ct);clearTimeout(pcs[k]._ft);clearTimeout(pcs[k]._gt)}unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
 function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)});if(camS||scrS)setTimeout(tuneVideo,1500)}   // more or fewer viewers: re-split the upload
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:ICE.iceServers});pcs[k]=pc;
@@ -1052,7 +1102,7 @@ function mk(k,init){
     else if(!pcSince[k]){pcSince[k]=Date.now();clearTimeout(pc._gt);pc._gt=setTimeout(()=>{if(pcs[k]===pc&&cur&&cur.type=='voice')panel()},GRACE+100)}   // show the status only if it is still not connected by then
     if(s=='failed'){heal();clearTimeout(pc._ft);pc._ft=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='failed')startRelay(k)},ICE.relay?6000:1500)}
     if(s=='disconnected'){clearTimeout(pc._dt);pc._dt=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='disconnected')heal()},4000)}
-    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k);if(camS||scrS)tuneVideo();if(vqOf(k)!='auto')tx({t:'sig',to:k,data:{vq:vqOf(k)}})}   // the direct call works again: stop the backup
+    if(s=='connected'||s=='completed'){pc._tries=0;stopRelay(k);tuneLinks();if(camS||scrS)tuneVideo();if(vqOf(k)!='auto')tx({t:'sig',to:k,data:{vq:vqOf(k)}})}   // the direct call works again: stop the backup
     if(cur&&cur.type=='voice')panel();
   };
   pc.onconnectionstatechange=st;pc.oniceconnectionstatechange=st;
@@ -1066,7 +1116,7 @@ function mk(k,init){
   };
   pc.onnegotiationneeded=async()=>{
     if(!pc._ready)return;
-    try{pc._m=true;await pc.setLocalDescription(await pc.createOffer(pc._rst?{iceRestart:true}:undefined));pc._rst=false;tx({t:'sig',to:k,data:{d:pc.localDescription}})}
+    try{pc._m=true;await pc.setLocalDescription(lean(await pc.createOffer(pc._rst?{iceRestart:true}:undefined)));pc._rst=false;tx({t:'sig',to:k,data:{d:pc.localDescription}})}
     catch{}finally{pc._m=false}
   };
   local.getTracks().forEach(t=>pc.addTrack(t,local));
@@ -1089,7 +1139,7 @@ async function handleSig(pc,k,d){
     if(clash&&pc.signalingState!='stable'){try{await pc.setLocalDescription({type:'rollback'})}catch{}}   // polite side drops its own offer and takes theirs
     await pc.setRemoteDescription(d.d);
     pc._ready=true;
-    if(d.d.type=='offer'){await pc.setLocalDescription(await pc.createAnswer());tx({t:'sig',to:k,data:{d:pc.localDescription}})}
+    if(d.d.type=='offer'){await pc.setLocalDescription(lean(await pc.createAnswer()));tx({t:'sig',to:k,data:{d:pc.localDescription}})}
   }else if(d.c){try{await pc.addIceCandidate(d.c)}catch(e){if(!pc._ign)throw e}}
 }
 </script></body></html>
