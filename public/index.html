@@ -48,10 +48,14 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .me .r{display:flex;gap:6px;align-items:center}
 .me .btns button{flex:1;padding:5px}
 .me b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#top{padding:12px 16px;border-bottom:1px solid var(--bd)}
-#top h2{margin:0;font-size:22px}
+#top{padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px}
+#top h2{margin:0;font-size:22px;flex:1}
 #msgs{flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
 .m{display:flex;gap:10px}.m p{margin:2px 0 0;word-break:break-word}.m small{color:var(--mut)}
+.m .del{opacity:0}.m:hover .del{opacity:1}@media(hover:none){.m .del{opacity:1}}
+.acts{display:flex;gap:4px}
+.sec[draggable=true],.ch[draggable=true]{cursor:grab}
+.dt{box-shadow:inset 0 2px 0 var(--red)}.db{box-shadow:inset 0 -2px 0 var(--red)}
 #send{display:flex;gap:8px;padding:12px}
 #vbox{flex:1;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-content:flex-start}
 .bar{width:100%;display:flex;gap:8px}
@@ -67,6 +71,12 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #modal h3{margin:0;font-size:22px}
 .rr{display:grid;gap:6px;padding:10px;border:1px solid var(--bd);border-radius:8px}
 .rr .top{display:flex;gap:8px}.cb{display:flex;gap:6px;align-items:center;font-size:14px}
+#ctx{position:fixed;z-index:20;background:var(--solid);border:1px solid var(--bd);border-radius:8px;padding:4px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.5);display:grid}
+#ctx button{text-align:left;border:0;background:none;padding:7px 10px;border-radius:5px}
+#ctx button:hover{background:var(--red);color:#fff}
+#ctx .dng{color:#ff5a67}#ctx .dng:hover{color:#fff}
+#ctx hr{border:0;border-top:1px solid var(--bd);margin:4px 0;width:100%}
+#ctx .lbl{padding:4px 10px;color:var(--mut);font-size:12px}
 @media(max-width:800px){#app{grid-template-columns:1fr;grid-template-rows:38vh 1fr}#mem{display:none}#side{border-right:0}}
 </style></head><body>
 
@@ -86,7 +96,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
     <div class="me" id="me"></div>
   </aside>
   <main>
-    <div id="top"><h2 id="title"></h2></div>
+    <div id="top"><h2 id="title"></h2><span id="topact"></span></div>
     <div id="msgs"></div>
     <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
@@ -94,6 +104,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
   <aside id="mem"><div class="hd"><b class="brand">Members</b></div><div class="list" id="mlist"></div></aside>
 </div>
 <div id="modal" class="hide"></div>
+<div id="ctx" class="hide"></div>
 <input type="file" id="file" accept="image/*" class="hide">
 
 <script>
@@ -124,10 +135,14 @@ function connect(){
 }
 const tx=o=>ws&&ws.readyState==1&&ws.send(JSON.stringify(o));
 if(tok)connect();
+// keep-alive: stops idle proxies and Render's 15-minute idle timer from cutting the connection
+setInterval(()=>{if(ws&&ws.readyState==1)tx({t:'ping'})},30000);
 
 function on(m){
   if(m.t=='state'){
-    S=m;$('#login').classList.add('hide');$('#app').classList.remove('hide');
+    const prev=vc&&S?new Set(S.voice[vc]||[]):null;S=m;
+    if(prev){const now=S.voice[vc]||[];if(now.some(k=>k!=S.me.key&&!prev.has(k)))sJoin();else if([...prev].some(k=>k!=S.me.key&&!now.includes(k)))sLeave()}
+    $('#login').classList.add('hide');$('#app').classList.remove('hide');
     const same=cur&&S.channels.find(c=>c.id==cur.id);
     if(same)cur=same;else pick(S.channels[0],true);
     render();syncPeers();
@@ -137,10 +152,12 @@ function on(m){
   else if(m.t=='sig')onSig(m.from,m.data);
   else if(m.t=='kicked'||m.t=='denied')leaveVoice(true);
   else if(m.t=='error')alert(m.msg);
+  else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
+  else if(m.t=='clear'&&cur&&m.ch==cur.id)$('#msgs').replaceChildren();
 }
 
 function avEl(k,name,cls){
-  const a=E('div','av '+(cls||''),(name||'?')[0].toUpperCase());a.dataset.k=k;
+  const a=E('div','av '+(cls||''),(name||'?')[0].toUpperCase());a.dataset.k=k;a.oncontextmenu=e=>{const u=S.users.find(x=>x.key==k);u&&userMenu(e,u)};
   const u=S&&S.users.find(x=>x.key==k);
   if(u&&u.av){const i=new Image();i.src='/av/'+k+'?v='+u.av;i.onerror=()=>i.remove();a.append(i)}
   return a;
@@ -149,7 +166,9 @@ function tag(id){const r=S.roles[id]||{name:id,color:'#777'};const t=E('span','t
 function addMsg(m){
   const d=E('div','m');d.append(avEl(m.key,m.name));
   const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
-  h.append(E('b',0,(u?u.name:m.name)+' '));if(u)h.append(tag(u.role),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+  const nb=E('b',0,(u?u.name:m.name)+' ');if(u)nb.oncontextmenu=e=>userMenu(e,u);h.append(nb);if(u)h.append(tag(u.role),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+  const mid=m.id||m.ts;d.dataset.id=mid;
+  if(S.me.role=='admin'){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}
   b.append(h,E('p',0,m.text));d.append(b);
   const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
 }
@@ -161,24 +180,42 @@ function pick(c,quiet){
 
 function render(){
   const me=S.me,P=p=>me.perms.includes(p),L=$('#chl');L.replaceChildren();
-  [['voice','Voice channels'],['text','Text channels']].forEach(([ty,lab])=>{
-    const s=E('div','sec');s.append(E('span',0,lab));
-    if(P('channels')){const b=E('button','x','+');b.title='Create channel';b.onclick=()=>newCh(ty);s.append(b)}
+  if(P('channels')){const ac=E('button',0,'+ Add category');ac.style.width='100%';ac.onclick=()=>{const n=prompt('Category name');if(n)tx({t:'addcat',name:n})};L.append(ac)}
+  [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
+    const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
+    if(cat.id&&!chs.length&&!P('channels'))return;
+    const s=E('div','sec'),acts=E('span','acts');s.append(E('span',0,cat.name),acts);
+    if(P('channels')){
+      const b=E('button','x','+');b.title='Create channel here';b.onclick=()=>newCh(cat.id);acts.append(b);
+      if(cat.id){
+        const r=E('button','x','✎');r.title='Rename category';r.onclick=()=>{const n=prompt('New category name',cat.name);if(n)tx({t:'renamecat',id:cat.id,name:n})};
+        const x=E('button','x','🗑');x.title='Delete category';x.onclick=()=>confirm('Delete category "'+cat.name+'"? Its channels move to Channels.')&&tx({t:'delcat',id:cat.id});
+        acts.append(r,x);dg(s,{kind:'cat',id:cat.id});
+      }
+      dz(s,a=>{
+        if(drag.kind=='ch')tx({t:'move',kind:'ch',id:drag.id,cat:cat.id,before:null});
+        else if(cat.id&&drag.id!=cat.id){const i=S.cats.findIndex(y=>y.id==cat.id),nx=a?S.cats.slice(i+1).find(y=>y.id!=drag.id):cat;tx({t:'move',kind:'cat',id:drag.id,before:nx?nx.id:null})}
+      });
+    }
     L.append(s);
-    S.channels.filter(c=>c.type==ty).forEach(c=>{
+    chs.forEach(c=>{
       const d=E('div','ch'+(cur&&cur.id==c.id?' on':''));
-      d.append(E('span',0,(ty=='voice'?'🔊 ':'# ')+c.name+(c.open?'':' 🔒')));
-      if(P('channels')){const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b)}
-      if(me.role=='admin'&&c.id!='open'){const b=E('button','x','🗑');b.title='Delete';b.onclick=e=>{e.stopPropagation();confirm('Delete "'+c.name+'"?')&&tx({t:'delch',id:c.id})};d.append(b)}
+      d.append(E('span',0,(c.type=='voice'?'🔊 ':'# ')+c.name+(c.open?'':' 🔒')));
+      if(P('channels')){
+        const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b);
+        if(c.id!='open'){const x=E('button','x','🗑');x.title='Delete channel';x.onclick=e=>{e.stopPropagation();confirm('Delete "'+c.name+'"? Its messages will be lost.')&&tx({t:'delch',id:c.id})};d.append(x)}
+        dg(d,{kind:'ch',id:c.id});
+        dz(d,a=>{if(drag.kind!='ch'||drag.id==c.id)return;const i=chs.findIndex(y=>y.id==c.id),nx=a?chs.slice(i+1).find(y=>y.id!=drag.id):c;tx({t:'move',kind:'ch',id:drag.id,cat:cat.id,before:nx?nx.id:null})});
+      }
       d.onclick=()=>pick(c);L.append(d);
-      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.append(avEl(k,u.name),E('span',0,u.name),...vsI(k));L.append(v)});
+      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.oncontextmenu=e=>userMenu(e,u);v.append(avEl(k,u.name),E('span',0,u.name),...vsI(k));L.append(v)});
     });
   });
   // my footer
   const f=$('#me'),mu=S.users.find(x=>x.key==me.key);f.replaceChildren();
   const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Change profile picture';a.onclick=()=>$('#file').click();
   const nm=E('b',0,mu.name);nm.style.cursor='pointer';nm.title='Settings';nm.onclick=settings;
-  const r1=E('div','r');r1.append(a,nm,tag(me.role));
+  const r1=E('div','r');r1.append(a,nm,tag(me.role));r1.oncontextmenu=e=>userMenu(e,mu);
   const r2=E('div','r btns'),eff=muted||deaf;
   const mic=E('button');mic.title=eff?'Unmute':'Mute';mic.append(ico('🎤',eff));
   mic.onclick=()=>{if(deaf){deaf=false;muted=false}else muted=!muted;setVS()};
@@ -191,6 +228,8 @@ function render(){
   // main
   const txt=cur&&cur.type=='text';
   $('#title').textContent=cur?(txt?'# ':'🔊 ')+cur.name:'';
+  const ta=$('#topact');ta.replaceChildren();
+  if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
   $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!cur);
   if(cur&&!txt)panel();
   // members
@@ -198,15 +237,17 @@ function render(){
   S.users.slice().sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).forEach(u=>{
     const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
     r.append(avEl(u.key,u.name),E('span',0,u.name+(u.banned?' (ban)':'')),tag(u.role));
-    if(mg){r.title='Manage';r.onclick=()=>manage(u)}
+    r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title='Click or right-click to manage';r.onclick=()=>manage(u)}
     M.append(r);
   });
 }
-function kickOk(u){
-  const me=S.me;
-  return me.perms.includes('kick')&&u.role!='admin'&&u.key!=me.key&&(me.role=='admin'||!(S.roles[u.role]||{perms:[]}).perms.includes('kick'));
-}
-function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||kickOk(u))}
+const STAFF=['channels','kick','assign'];
+const staffRole=id=>((S.roles[id]||{perms:[]}).perms||[]).some(x=>STAFF.includes(x));
+function tgtOk(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||!staffRole(u.role))}
+function kickOk(u){return tgtOk(u)&&!u.banned&&S.me.perms.includes('kick')}
+function canAssign(u){return tgtOk(u)&&!u.banned&&(S.me.role=='admin'||S.me.perms.includes('assign'))}
+function assignable(){return Object.entries(S.roles).filter(([i])=>i!='admin'&&(S.me.role=='admin'||!staffRole(i)))}
+function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(u.banned?S.me.role=='admin':canAssign(u)||kickOk(u))}
 
 function modal(t,...n){
   const m=$('#modal');m.replaceChildren();const d=E('div');d.append(E('h3',0,t),...n);
@@ -215,17 +256,20 @@ function modal(t,...n){
 $('#modal').onclick=e=>{if(e.target.id=='modal')e.target.classList.add('hide')};
 const close=()=>$('#modal').classList.add('hide');
 
-function newCh(type){
-  const name=prompt('Name of the new '+(type=='voice'?'voice':'text')+' channel');if(!name)return;
-  tx({t:'addch',name,type,open:confirm('Make this channel open to everyone with an account?\nOK = Open   |   Cancel = Private (Verified and above only)')});
+function newCh(cat){
+  const n=E('input');n.placeholder='Channel name';n.maxLength=30;
+  const t=E('select');[['text','Text channel'],['voice','Voice channel']].forEach(([v,l])=>{const o=E('option',0,l);o.value=v;t.append(o)});
+  const lb=E('label','cb'),o=E('input');o.type='checkbox';lb.append(o,'Open to everyone (unchecked = private, Verified and above)');
+  const b=E('button','p','Create channel');b.onclick=()=>{if(!n.value.trim())return;tx({t:'addch',name:n.value,type:t.value,open:o.checked,cat});close()};
+  modal('New channel',n,t,lb,b);
 }
 function manage(u){
   const n=[];
   if(u.banned){if(S.me.role=='admin'){const b=E('button','p','Unban');b.onclick=()=>{tx({t:'unban',key:u.key});close()};n.push(b)}}
   else{
-    if(S.me.role=='admin'){
+    if(canAssign(u)){
       const s=E('select');
-      Object.entries(S.roles).filter(([i])=>i!='admin').forEach(([i,r])=>{const o=E('option',0,r.name);o.value=i;s.append(o)});
+      assignable().forEach(([i,r])=>{const o=E('option',0,r.name);o.value=i;s.append(o)});
       s.value=u.role;s.onchange=()=>tx({t:'setrole',key:u.key,role:s.value});
       n.push(E('label',0,'Role'),s);
     }
@@ -238,7 +282,7 @@ function manage(u){
   }
   modal(u.name,...n);
 }
-const PL={channels:'Create and rename channels',kick:'Kick and ban users',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',private:'See private voice and text channels'};
 function roleRow(id,r){
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
   nm.value=r.name;nm.placeholder='Role name';co.type='color';co.value=r.color;top.append(nm,co);d.append(top);
@@ -262,6 +306,16 @@ $('#file').onchange=e=>{
   i.src=URL.createObjectURL(f);e.target.value='';
 };
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
+
+/* ---------- Drag and drop (channels, categories) ---------- */
+let drag=null;
+function dg(el,o){el.draggable=true;el.ondragstart=e=>{drag=o;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x');e.stopPropagation()};el.ondragend=()=>{drag=null}}
+function dz(el,f){
+  const low=e=>{const r=el.getBoundingClientRect();return e.clientY>=r.top+r.height/2};
+  el.ondragover=e=>{if(!drag)return;e.preventDefault();const a=low(e);el.classList.toggle('dt',!a);el.classList.toggle('db',a)};
+  el.ondragleave=()=>el.classList.remove('dt','db');
+  el.ondrop=e=>{e.preventDefault();e.stopPropagation();const a=low(e);el.classList.remove('dt','db');if(drag)f(a);drag=null};
+}
 
 /* ---------- Settings, mute / deafen, speaking indicator ---------- */
 const ico=(c,off)=>E('span','ico'+(off?' off':''),c);
@@ -293,23 +347,65 @@ setInterval(()=>{
   document.querySelectorAll('.vm .av[data-k],.vc .av[data-k]').forEach(e=>e.classList.toggle('speaking',sp.has(e.dataset.k)));
 },100);
 
+/* ---------- Right-click menu and join/leave sounds ---------- */
+function ctx(e,items){
+  e.preventDefault();e.stopPropagation();
+  const m=$('#ctx');m.replaceChildren();
+  items.forEach(i=>{
+    if(i===null)m.append(E('hr'));
+    else if(typeof i=='string')m.append(E('div','lbl',i));
+    else{const b=E('button',i[2]||'',i[0]);b.onclick=()=>{hideCtx();i[1]()};m.append(b)}
+  });
+  m.classList.remove('hide');
+  m.style.left=Math.max(4,Math.min(e.clientX,innerWidth-m.offsetWidth-6))+'px';
+  m.style.top=Math.max(4,Math.min(e.clientY,innerHeight-m.offsetHeight-6))+'px';
+}
+const hideCtx=()=>$('#ctx').classList.add('hide');
+document.addEventListener('click',hideCtx);
+document.addEventListener('contextmenu',e=>{if(!e.defaultPrevented)hideCtx()});
+document.addEventListener('keydown',e=>{if(e.key=='Escape')hideCtx()});
+addEventListener('resize',hideCtx);
+function userMenu(e,u){
+  const me=S.me,it=[u.name];
+  if(u.key==me.key){
+    it.push(['Change display name',()=>{const n=prompt('New display name',u.name);if(n)tx({t:'setname',name:n})}],
+      ['Change profile picture',()=>$('#file').click()],null,
+      [muted||deaf?'Unmute':'Mute',()=>{if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}],
+      [deaf?'Undeafen':'Deafen',()=>{deaf=!deaf;setVS()}]);
+  }else if(u.banned){
+    if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})]);
+  }else{
+    if(canAssign(u)){it.push(null,'Role');assignable().forEach(([id,r])=>it.push([(u.role==id?'✓ ':'')+r.name,()=>tx({t:'setrole',key:u.key,role:id})]))}
+    if(kickOk(u))it.push(null,['Kick',()=>tx({t:'kick',key:u.key}),'dng'],['Ban',()=>confirm('Ban '+u.name+'?')&&tx({t:'ban',key:u.key}),'dng']);
+  }
+  if(it.length>1)ctx(e,it);
+}
+function beep(fs){
+  if(deaf)return;
+  try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();actx.resume();const t=actx.currentTime;
+    fs.forEach((f,i)=>{const o=actx.createOscillator(),g=actx.createGain(),s=t+i*.11;
+      o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.18,s+.02);g.gain.exponentialRampToValueAtTime(.001,s+.16);
+      o.connect(g);g.connect(actx.destination);o.start(s);o.stop(s+.18)})}catch{}
+}
+const sJoin=()=>beep([523,784]),sLeave=()=>beep([659,440]);
+
 /* ---------- Voice (WebRTC mesh, best for small groups) ---------- */
 function panel(){
   const v=$('#vbox');v.replaceChildren();
   const inV=vc==cur.id,bar=E('div','bar');
   const j=E('button','p',inV?'Leave voice':'Join voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
   v.append(bar);
-  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.append(avEl(k,u.name,'big'),E('div',0,u.name));const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}v.append(c)});
+  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}v.append(c)});
 }
 async function joinVoice(id){
   try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
   catch{return alert('Microphone permission and HTTPS are required.')}
-  vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});tx({t:'vs',m:muted,d:deaf});
+  vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});tx({t:'vs',m:muted,d:deaf});sJoin();
 }
 function leaveVoice(quiet){
   Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
   if(local)local.getTracks().forEach(t=>t.stop());
-  local=null;if(vc&&!quiet)tx({t:'leave'});
+  local=null;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
 function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
