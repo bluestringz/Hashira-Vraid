@@ -62,6 +62,16 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
 .vc button{font-size:11px;padding:2px 6px}
 .lmrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.more{opacity:0;margin-left:auto}.ch:hover .more,.sec:hover .more{opacity:1}@media(hover:none){.more{opacity:1}}
+.dropin{box-shadow:inset 0 0 0 2px var(--red);background:var(--pan2)}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;width:100%}
+.vgrid .vc{width:auto;padding:14px 8px;background:var(--pan2);border-radius:8px;align-content:center}
+.vt{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;cursor:pointer;transition:box-shadow .1s}
+.vt video{width:100%;height:100%;object-fit:cover;display:block}
+.vt.scr video{object-fit:contain}.vt.mine.cam video{transform:scaleX(-1)}
+.vt .vl{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.6);color:#fff;padding:2px 8px;border-radius:5px;font-size:13px}
+.vt.speaking{box-shadow:0 0 0 3px #3ba55d}
+.vt.focus{grid-column:1/-1;aspect-ratio:auto;height:min(70vh,720px)}.vt.focus video{object-fit:contain}
 .mrow{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px}
 .mrow.mg{cursor:pointer}.mrow:hover{background:var(--pan2)}
 .mrow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -132,7 +142,7 @@ async function auth(mode){
 }
 function connect(){
   ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
-  ws.onopen=()=>tx({t:'vs',m:muted,d:deaf});
+  ws.onopen=()=>sendVS();
   ws.onmessage=e=>on(JSON.parse(e.data));
   ws.onclose=e=>{
     leaveVoice(true);
@@ -158,9 +168,11 @@ function on(m){
     const same=cur&&S.channels.find(c=>c.id==cur.id);
     if(same)cur=same;else pick(S.channels[0],true);
     render();syncPeers();
+    if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
   }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg)}
   else if(m.t=='chat'&&cur&&m.ch==cur.id)addMsg(m.msg);
   else if(m.t=='peers')m.peers.forEach(k=>mk(k,true));
+  else if(m.t=='moved'){Object.keys(pcs).forEach(closePeer);vc=m.ch;toast('A moderator moved you to another voice channel');const c=S&&S.channels.find(x=>x.id==m.ch);if(c)pick(c)}
   else if(m.t=='sig')onSig(m.from,m.data);
   else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
   else if(m.t=='kicked'||m.t=='denied'){leaveVoice(true);if(m.by)toast('You were disconnected from voice by a moderator')}
@@ -193,18 +205,21 @@ function pick(c,quiet){
 
 function render(){
   const me=S.me,P=p=>me.perms.includes(p),L=$('#chl');L.replaceChildren();
-  if(P('channels')){const ac=E('button',0,'+ Add category');ac.style.width='100%';ac.onclick=()=>{const n=prompt('Category name');if(n)tx({t:'addcat',name:n})};L.append(ac)}
+  // channel list: clean rows. Add / rename / delete are in the right-click menu (or the ⋯ that shows on hover).
+  const addCat=()=>{const n=prompt('Category name');if(n)tx({t:'addcat',name:n})};
+  const more=fn=>{const b=E('button','x more','⋯');b.title='More (or right-click)';b.onclick=e=>fn(e);return b};
+  L.oncontextmenu=P('channels')?e=>ctx(e,['Channels',['Add channel',()=>newCh('')],['Add category',addCat]]):null;
   [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
     const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
     if(cat.id&&!chs.length&&!P('channels'))return;
-    const s=E('div','sec'),acts=E('span','acts');s.append(E('span',0,cat.name),acts);
+    const s=E('div','sec');s.append(E('span',0,cat.name));
     if(P('channels')){
-      const b=E('button','x','+');b.title='Create channel here';b.onclick=()=>newCh(cat.id);acts.append(b);
-      if(cat.id){
-        const r=E('button','x','✎');r.title='Rename category';r.onclick=()=>{const n=prompt('New category name',cat.name);if(n)tx({t:'renamecat',id:cat.id,name:n})};
-        const x=E('button','x','🗑');x.title='Delete category';x.onclick=()=>confirm('Delete category "'+cat.name+'"? Its channels move to Channels.')&&tx({t:'delcat',id:cat.id});
-        acts.append(r,x);dg(s,{kind:'cat',id:cat.id});
-      }
+      const menu=e=>ctx(e,[cat.name,['Add channel here',()=>newCh(cat.id)],
+        ...(cat.id?[['Rename category',()=>{const n=prompt('New category name',cat.name);if(n)tx({t:'renamecat',id:cat.id,name:n})}],
+          ['Delete category',()=>confirm('Delete category "'+cat.name+'"? Its channels move to Channels.')&&tx({t:'delcat',id:cat.id}),'dng']]:[]),
+        null,['Add category',addCat]]);
+      s.oncontextmenu=menu;s.append(more(menu));
+      if(cat.id)dg(s,{kind:'cat',id:cat.id});
       dz(s,a=>{
         if(drag.kind=='ch')tx({t:'move',kind:'ch',id:drag.id,cat:cat.id,before:null});
         else if(cat.id&&drag.id!=cat.id){const i=S.cats.findIndex(y=>y.id==cat.id),nx=a?S.cats.slice(i+1).find(y=>y.id!=drag.id):cat;tx({t:'move',kind:'cat',id:drag.id,before:nx?nx.id:null})}
@@ -214,14 +229,17 @@ function render(){
     chs.forEach(c=>{
       const d=E('div','ch'+(cur&&cur.id==c.id?' on':''));
       d.append(E('span',0,(c.type=='voice'?'🔊 ':'# ')+c.name+(c.open?'':' 🔒')));
+      if(c.roles&&c.roles.length)d.title='Only: '+c.roles.map(r=>(S.roles[r]||{name:r}).name).join(', ');
       if(P('channels')){
-        const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b);
-        if(c.id!='open'){const x=E('button','x','🗑');x.title='Delete channel';x.onclick=e=>{e.stopPropagation();confirm('Delete "'+c.name+'"? Its messages will be lost.')&&tx({t:'delch',id:c.id})};d.append(x)}
-        dg(d,{kind:'ch',id:c.id});
-        dz(d,a=>{if(drag.kind!='ch'||drag.id==c.id)return;const i=chs.findIndex(y=>y.id==c.id),nx=a?chs.slice(i+1).find(y=>y.id!=drag.id):c;tx({t:'move',kind:'ch',id:drag.id,cat:cat.id,before:nx?nx.id:null})});
+        const menu=e=>ctx(e,[c.name,['Rename channel',()=>{const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})}],
+          ...(c.id!='open'?[['Who can enter…',()=>chAccess(c)],['Delete channel',()=>confirm('Delete "'+c.name+'"? Its messages will be lost.')&&tx({t:'delch',id:c.id}),'dng']]:[])]);
+        d.oncontextmenu=menu;d.append(more(menu));dg(d,{kind:'ch',id:c.id});
       }
+      const reorder=P('channels')?a=>{if(drag.kind!='ch'||drag.id==c.id)return;const i=chs.findIndex(y=>y.id==c.id),nx=a?chs.slice(i+1).find(y=>y.id!=drag.id):c;tx({t:'move',kind:'ch',id:drag.id,cat:cat.id,before:nx?nx.id:null})}:null;
+      const drop=c.type=='voice'&&P('move')?()=>tx({t:'vmove',key:drag.id,ch:c.id}):null;   // drop a person on a voice channel to move them
+      if(reorder||drop)dz(d,reorder,drop);
       d.onclick=()=>pick(c);L.append(d);
-      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.oncontextmenu=e=>userMenu(e,u);v.append(avEl(k,u.name),E('span',0,u.name),...vsI(k));L.append(v)});
+      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.oncontextmenu=e=>userMenu(e,u);v.append(avEl(k,u.name),E('span',0,u.name),...vsI(k));if(canMoveU(u))dg(v,{kind:'user',id:k});L.append(v)});
     });
   });
   // my footer
@@ -261,42 +279,64 @@ function render(){
     list.forEach(u=>{
       const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
       r.append(avEl(u.key,u.name),E('span',0,u.name));
-      r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title='Click or right-click to manage';r.onclick=()=>manage(u)}
+      r.title=(u.roles&&u.roles.length?u.roles.map(nameOf).join(', '):'Default');r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title+=' (click or right-click to manage)';r.onclick=()=>manage(u)}
       M.append(r);
     });
   });
 }
-const STAFF=['channels','kick','assign','roles','voicemod','disconnect'];
+const STAFF=['channels','kick','assign','roles','voicemod','disconnect','move'];
 const staffRole=id=>((S.roles[id]||{perms:[]}).perms||[]).some(x=>STAFF.includes(x));
-function tgtOk(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||!staffRole(u.role))}
+function tgtOk(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||!(u.roles||[]).some(staffRole))}
 function kickOk(u){return tgtOk(u)&&!u.banned&&S.me.perms.includes('kick')}
 function canAssign(u){return tgtOk(u)&&!u.banned&&(S.me.role=='admin'||S.me.perms.includes('assign'))}
-function assignable(){return Object.entries(S.roles).filter(([i])=>i!='admin'&&(S.me.role=='admin'||!staffRole(i)))}
+function assignable(){return Object.entries(S.roles).filter(([i])=>i!='admin'&&i!='default'&&(S.me.role=='admin'||!staffRole(i)))}
 function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(u.banned?S.me.role=='admin':canAssign(u)||kickOk(u)||voiceItems(u).length>0)}
 
 function modal(t,...n){
-  const m=$('#modal');m.replaceChildren();const d=E('div');d.append(E('h3',0,t),...n);
+  managing=null;const m=$('#modal');m.replaceChildren();const d=E('div');d.append(E('h3',0,t),...n);
   const c=E('button',0,'Close');c.onclick=()=>m.classList.add('hide');d.append(c);m.append(d);m.classList.remove('hide');
 }
 $('#modal').onclick=e=>{if(e.target.id=='modal')e.target.classList.add('hide')};
 const close=()=>$('#modal').classList.add('hide');
 
+function accessEd(c){   // who may see and enter a channel: everyone, or only people with one of the ticked roles
+  const box=E('div','rr'),ok=E('input'),lb=E('label','cb'),list=E('div');
+  ok.type='checkbox';ok.checked=!!c.open&&!(c.roles||[]).length;lb.append(ok,'Open to everyone');
+  const rs=Object.entries(S.roles).filter(([i])=>i!='admin'&&i!='default').map(([id,r])=>{
+    const l=E('label','cb'),x=E('input'),dot=E('i');x.type='checkbox';x.checked=(c.roles||[]).includes(id);
+    dot.style.cssText='width:8px;height:8px;border-radius:50%;display:inline-block;background:'+r.color;
+    l.append(x,dot,' '+r.name);list.append(l);return[id,x]});
+  const note=E('small',0,'Tick the roles that can see and join this channel (admins always can). If none are ticked, anyone with the "See private voice and text channels" permission can, which is Verified and above by default.');
+  const sync=()=>{list.style.display=note.style.display=ok.checked?'none':''};
+  ok.onchange=()=>{if(ok.checked)rs.forEach(([,x])=>x.checked=false);sync()};sync();
+  box.append(lb,list,note);
+  return{node:box,get:()=>({open:ok.checked,roles:ok.checked?[]:rs.filter(([,x])=>x.checked).map(([id])=>id)})};
+}
+function chAccess(c){
+  const ed=accessEd(c),b=E('button','p','Save access');
+  b.onclick=()=>{const a=ed.get();tx({t:'chaccess',id:c.id,open:a.open,roles:a.roles});close()};
+  modal('Who can enter "'+c.name+'"',ed.node,b);
+}
 function newCh(cat){
   const n=E('input');n.placeholder='Channel name';n.maxLength=30;
   const t=E('select');[['text','Text channel'],['voice','Voice channel']].forEach(([v,l])=>{const o=E('option',0,l);o.value=v;t.append(o)});
-  const lb=E('label','cb'),o=E('input');o.type='checkbox';lb.append(o,'Open to everyone (unchecked = private, Verified and above)');
-  const b=E('button','p','Create channel');b.onclick=()=>{if(!n.value.trim())return;tx({t:'addch',name:n.value,type:t.value,open:o.checked,cat});close()};
-  modal('New channel',n,t,lb,b);
+  const ed=accessEd({open:false,roles:[]}),b=E('button','p','Create channel');
+  b.onclick=()=>{if(!n.value.trim())return;const a=ed.get();tx({t:'addch',name:n.value,type:t.value,open:a.open,roles:a.roles,cat});close()};
+  modal('New channel',n,t,ed.node,b);
 }
 function manage(u){
   const n=[];
   if(u.banned){if(S.me.role=='admin'){const b=E('button','p','Unban');b.onclick=()=>{tx({t:'unban',key:u.key});close()};n.push(b)}}
   else{
     if(canAssign(u)){
-      const s=E('select');
-      assignable().forEach(([i,r])=>{const o=E('option',0,r.name);o.value=i;s.append(o)});
-      s.value=u.role;s.onchange=()=>tx({t:'setrole',key:u.key,role:s.value});
-      n.push(E('label',0,'Role'),s);
+      n.push(E('label',0,'Roles (tick as many as needed)'));
+      assignable().forEach(([id,r])=>{
+        const lb=E('label','cb'),c=E('input'),dot=E('i');c.type='checkbox';c.checked=(u.roles||[]).includes(id);
+        dot.style.cssText='width:8px;height:8px;border-radius:50%;display:inline-block;background:'+r.color;
+        c.onchange=()=>tx({t:'togglerole',key:u.key,role:id,on:c.checked});
+        lb.append(c,dot,' '+r.name);n.push(lb);
+      });
+      n.push(E('small',0,'Everyone also has Default. Untick everything to go back to Default only.'));
     }
     if(kickOk(u)){
       const k=E('button',0,'Kick'),b=E('button','p','Ban');
@@ -306,9 +346,9 @@ function manage(u){
     }
   }
   voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
-  modal(u.name,...n);
+  modal(u.name,...n);managing={k:u.key,sig:JSON.stringify([u.roles,u.banned])};
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Manage roles (only up to your own permissions)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Manage roles (only up to your own permissions)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',private:'See private voice and text channels'};
 function roleRow(id,r){
   const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
@@ -318,7 +358,7 @@ function roleRow(id,r){
   const sv=E('button','p',id?'Save':'Create role');
   sv.onclick=()=>{tx({t:'role',id,name:nm.value,color:co.value,perms:ps.filter(([,c])=>c.checked).map(([k])=>k)});close()};
   d.append(sv);
-  if(id&&id!='default'){const x=E('button',0,'Delete role');x.onclick=()=>confirm('Delete this role? Members who have it go back to Default.')&&(tx({t:'delrole',id}),close());d.append(x)}
+  if(id&&id!='default'){const x=E('button',0,'Delete role');x.onclick=()=>confirm('Delete this role? Members lose it, and channels that only listed this role fall back to the Verified-and-above rule.')&&(tx({t:'delrole',id}),close());d.append(x)}
   return d;
 }
 function roleModal(){
@@ -336,18 +376,28 @@ $('#file').onchange=e=>{
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
 
 /* ---------- Drag and drop (channels, categories) ---------- */
-let drag=null;const fold=new Set();
+let drag=null;const fold=new Set();let managing=null;   // managing: the person whose role box is open, so it refreshes when roles change
 function dg(el,o){el.draggable=true;el.ondragstart=e=>{drag=o;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x');e.stopPropagation()};el.ondragend=()=>{drag=null}}
-function dz(el,f){
+function dz(el,f,uf){   // f: reorder handler (channels/categories), uf: drop handler for a person being moved
   const low=e=>{const r=el.getBoundingClientRect();return e.clientY>=r.top+r.height/2};
-  el.ondragover=e=>{if(!drag)return;e.preventDefault();const a=low(e);el.classList.toggle('dt',!a);el.classList.toggle('db',a)};
-  el.ondragleave=()=>el.classList.remove('dt','db');
-  el.ondrop=e=>{e.preventDefault();e.stopPropagation();const a=low(e);el.classList.remove('dt','db');if(drag)f(a);drag=null};
+  el.ondragover=e=>{
+    if(!drag)return;
+    if(drag.kind=='user'){if(!uf)return;e.preventDefault();el.classList.add('dropin');return}
+    if(!f)return;
+    e.preventDefault();const a=low(e);el.classList.toggle('dt',!a);el.classList.toggle('db',a);
+  };
+  el.ondragleave=()=>el.classList.remove('dt','db','dropin');
+  el.ondrop=e=>{
+    if(!drag)return;
+    const a=low(e),user=drag.kind=='user';el.classList.remove('dt','db','dropin');
+    if(user?uf:f){e.preventDefault();e.stopPropagation();user?uf():f(a)}
+    drag=null;
+  };
 }
 
 /* ---------- Settings, mute / deafen, speaking indicator ---------- */
 const ico=(c,off)=>E('span','ico'+(off?' off':''),c);
-const vsI=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{},d=s.d||v.d,mu=d||s.m||v.m,a=d?[ico('🎤',1),ico('🎧',1)]:mu?[ico('🎤',1)]:[];if(lmute.has(k)){const l=ico('🔊',1);l.title='Muted for you';a.push(l)}return a};
+const vsI=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{},d=s.d||v.d,mu=d||s.m||v.m,a=d?[ico('🎤',1),ico('🎧',1)]:mu?[ico('🎤',1)]:[];if(lmute.has(k)){const l=ico('🔊',1);l.title='Muted for you';a.push(l)}if(s.cam)a.push(ico('📷'));if(s.scr)a.push(ico('🖥'));return a};
 const svm=()=>!!(S&&S.me.sv&&S.me.sv.m),svd=()=>!!(S&&S.me.sv&&S.me.sv.d);
 // "Mute for me": only this browser stops hearing that person; everyone else still hears them. Saved in this browser.
 let lmute=new Set();try{lmute=new Set(JSON.parse(localStorage.lm||'[]'))}catch{}
@@ -358,7 +408,7 @@ const audioMuted=k=>!hear()||peerMuted(k)||lmute.has(k);
 const peerMuted=k=>{const v=S&&S.sv&&S.sv[k];return !!(v&&(v.m||v.d))};   // everyone silences server-muted people, so it holds even if their own app ignores it
 function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!(muted||deaf||svm()||svd()))}
 function syncAudio(){Object.entries(auds).forEach(([k,a])=>a.muted=audioMuted(k))}
-function setVS(){applyMic();syncAudio();tx({t:'vs',m:muted,d:deaf});render()}
+function setVS(){applyMic();syncAudio();sendVS();render()}
 function toggleMute(){if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
 function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS()}
 let tt;function toast(t){const e=$('#toast');e.textContent=t;e.classList.remove('hide');clearTimeout(tt);tt=setTimeout(()=>e.classList.add('hide'),3500)}
@@ -370,9 +420,14 @@ function voiceItems(u){
     if(inV||sv.m)it.push([sv.m?'Remove server mute':'Server mute',()=>tx({t:'smute',key:u.key,on:!sv.m})]);
     if(inV||sv.d)it.push([sv.d?'Remove server deafen':'Server deafen',()=>tx({t:'sdeaf',key:u.key,on:!sv.d})]);
   }
+  if(me.perms.includes('move')&&inV){
+    const at=Object.keys(S.voice).find(c=>S.voice[c].includes(u.key));
+    S.channels.filter(c=>c.type=='voice'&&c.id!=at).forEach(c=>it.push(['Move to '+c.name,()=>tx({t:'vmove',key:u.key,ch:c.id})]));
+  }
   if(me.perms.includes('disconnect')&&inV)it.push(['Disconnect from voice',()=>tx({t:'vkick',key:u.key}),'dng']);
   return it;
 }
+function canMoveU(u){return S.me.perms.includes('move')&&tgtOk(u)&&!u.banned}
 function settings(){
   const me=S.users.find(x=>x.key==S.me.key),n=E('input');n.value=me.name;n.maxLength=20;
   const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
@@ -398,7 +453,7 @@ setInterval(()=>{
     for(const v of o.buf){const d=(v-128)/128;s+=d*d}
     if(Math.sqrt(s/o.buf.length)>0.03)o.t=now;
     if(now-o.t<300)sp.add(k)}
-  document.querySelectorAll('.vm .av[data-k],.vc .av[data-k]').forEach(e=>e.classList.toggle('speaking',sp.has(e.dataset.k)));
+  document.querySelectorAll('.vm .av[data-k],.vc .av[data-k],.vt.cam[data-k]').forEach(e=>e.classList.toggle('speaking',sp.has(e.dataset.k)));
 },100);
 
 /* ---------- Right-click menu and join/leave sounds ---------- */
@@ -430,7 +485,7 @@ function userMenu(e,u){
     if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})]);
   }else{
     it.push([lmute.has(u.key)?'Unmute for me':'Mute for me',()=>toggleLM(u.key)]);
-    if(canAssign(u)){it.push(null,'Role');assignable().forEach(([id,r])=>it.push([(u.role==id?'✓ ':'')+r.name,()=>tx({t:'setrole',key:u.key,role:id})]))}
+    if(canAssign(u))it.push(null,['Manage roles…',()=>manage(u)]);
     if(kickOk(u))it.push(null,['Kick',()=>tx({t:'kick',key:u.key}),'dng'],['Ban',()=>confirm('Ban '+u.name+'?')&&tx({t:'ban',key:u.key}),'dng']);
   }
   const vi=voiceItems(u);if(vi.length)it.push(null,...vi);
@@ -455,42 +510,134 @@ function sfxPlay(n,notes){
 const sJoin=()=>sfxPlay('join',[[587,0],[880,.1]]),sLeave=()=>sfxPlay('leave',[[784,0],[523,.1]]);
 
 /* ---------- Voice (WebRTC mesh, best for small groups) ---------- */
+/* ---------- Voice panel: people and video tiles ---------- */
+const vst={},vel={};let camS=null,scrS=null,focusT=null;   // vst: remote video streams per person, vel: cached <video> elements (so they don't restart on every redraw)
+function sendVS(){tx({t:'vs',m:muted,d:deaf,cam:camS?camS.id:null,scr:scrS?scrS.id:null})}
+function videos(k){
+  const out=[];
+  if(k==S.me.key){if(camS)out.push({id:camS.id,kind:'cam',stream:camS});if(scrS)out.push({id:scrS.id,kind:'scr',stream:scrS});return out}
+  const s=(S.vs||{})[k]||{},m=vst[k];if(!m)return out;
+  if(s.cam&&m.get(s.cam))out.push({id:s.cam,kind:'cam',stream:m.get(s.cam)});
+  if(s.scr&&m.get(s.scr))out.push({id:s.scr,kind:'scr',stream:m.get(s.scr)});
+  return out;
+}
+function vtile(u,x,used){
+  const d=E('div','vt '+x.kind+(u.key==S.me.key?' mine':'')+(focusT==x.id?' focus':'')),key=u.key+':'+x.id;
+  if(x.kind=='cam')d.dataset.k=u.key;
+  let v=vel[key];
+  if(!v){v=document.createElement('video');v.autoplay=true;v.playsInline=true;v.muted=true;v.srcObject=x.stream;vel[key]=v}
+  used.add(key);
+  d.append(v,E('div','vl',u.name+(x.kind=='scr'?' (screen)':'')));
+  d.onclick=()=>{focusT=focusT==x.id?null:x.id;panel()};d.oncontextmenu=e=>userMenu(e,u);
+  setTimeout(()=>{const p=v.play&&v.play();p&&p.catch&&p.catch(()=>{})},0);
+  return d;
+}
+function atile(u){
+  const k=u.key,c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));
+  const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}
+  if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(b)}
+  return c;
+}
 function panel(){
   const v=$('#vbox');v.replaceChildren();
   const inV=vc==cur.id,bar=E('div','bar');
   const j=E('button','p',inV?'Leave voice':'Join voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
+  if(inV){
+    const cb=E('button',0,camS?'Turn off camera':'Turn on camera');cb.onclick=toggleCam;bar.append(cb);
+    if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia){const sb=E('button',0,scrS?'Stop sharing':'Share screen');sb.onclick=toggleScreen;bar.append(sb)}
+  }
   v.append(bar);
-  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}
-    if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(b)}
-    v.append(c)});
+  const grid=E('div','vgrid'),used=new Set();
+  (S.voice[cur.id]||[]).forEach(k=>{
+    const u=S.users.find(x=>x.key==k);if(!u)return;
+    const vids=videos(k),cam=vids.find(x=>x.kind=='cam');
+    grid.append(cam?vtile(u,cam,used):atile(u));
+    vids.filter(x=>x.kind=='scr').forEach(x=>grid.append(vtile(u,x,used)));
+  });
+  Object.keys(vel).forEach(key=>{if(!used.has(key)){vel[key].srcObject=null;delete vel[key]}});
+  v.append(grid);
 }
+
+/* ---------- Camera and screen share (window, tab or entire screen: the browser asks which) ---------- */
+async function toggleCam(){
+  if(!vc)return;
+  if(camS)return stopVideo('cam');
+  let s;
+  try{s=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:960},height:{ideal:540},frameRate:{ideal:24}}})}
+  catch{return toast('Could not open the camera. Check the browser permission.')}
+  if(!vc){s.getTracks().forEach(t=>t.stop());return}
+  camS=s;startVideo('cam',s);
+}
+async function toggleScreen(){
+  if(!vc)return;
+  if(scrS)return stopVideo('scr');
+  let s;
+  try{s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:30}},audio:false})}
+  catch{return}   // picker cancelled
+  if(!vc){s.getTracks().forEach(t=>t.stop());return}
+  scrS=s;startVideo('scr',s);
+}
+function startVideo(kind,s){
+  const t=s.getVideoTracks()[0];t.contentHint=kind=='scr'?'detail':'motion';t.onended=()=>stopVideo(kind);   // onended: the browser's own "Stop sharing" button
+  Object.values(pcs).forEach(pc=>addVideo(pc,s));
+  sendVS();if(cur&&cur.type=='voice')panel();
+}
+function addVideo(pc,s){s.getVideoTracks().forEach(t=>{try{pc._snd.set(s.id,pc.addTrack(t,s))}catch{}})}
+function killVideo(kind){const s=kind=='cam'?camS:scrS;if(!s)return;s.getTracks().forEach(t=>{t.onended=null;t.stop()});if(kind=='cam')camS=null;else scrS=null}
+function stopVideo(kind){
+  const s=kind=='cam'?camS:scrS;if(!s)return;
+  Object.values(pcs).forEach(pc=>{const sn=pc._snd.get(s.id);if(sn){try{pc.removeTrack(sn)}catch{}pc._snd.delete(s.id)}});
+  killVideo(kind);sendVS();if(cur&&cur.type=='voice')panel();
+}
+
+/* ---------- Voice connections (WebRTC mesh, best for small groups) ---------- */
 async function joinVoice(id){
   try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
   catch{return alert('Microphone permission and HTTPS are required.')}
-  vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});tx({t:'vs',m:muted,d:deaf});sJoin();
+  vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});sendVS();sJoin();
 }
 function leaveVoice(quiet){
   Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
+  ['cam','scr'].forEach(killVideo);
   if(local)local.getTracks().forEach(t=>t.stop());
   local=null;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
-function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
 function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pcs[k]=pc;
+  // "Perfect negotiation": either side may renegotiate (camera or screen turned on/off); the side with the smaller key backs off on a clash.
+  pc._snd=new Map();pc._m=false;pc._ign=false;pc._pol=S.me.key<k;pc._ready=!!init;
   pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
-  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.muted=audioMuted(k);a.play().catch(()=>{});watch(k,e.streams[0])};
-  if(init)pc.onnegotiationneeded=async()=>{await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})};
+  pc.ontrack=e=>{
+    const st=e.streams[0]||new MediaStream([e.track]);
+    if(e.track.kind=='audio'){const a=auds[k]||(auds[k]=new Audio());a.srcObject=st;a.muted=audioMuted(k);const p=a.play();p&&p.catch&&p.catch(()=>{});watch(k,st)}
+    else{(vst[k]=vst[k]||new Map()).set(st.id,st);if(cur&&cur.type=='voice')panel()}
+  };
+  pc.onnegotiationneeded=async()=>{
+    if(!pc._ready)return;
+    try{pc._m=true;await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})}
+    catch{}finally{pc._m=false}
+  };
   local.getTracks().forEach(t=>pc.addTrack(t,local));
+  if(camS)addVideo(pc,camS);if(scrS)addVideo(pc,scrS);
   return pc;
 }
-async function onSig(k,d){
+function onSig(k,d){
   if(!local)return;
   const pc=pcs[k]||mk(k,false);
+  pc._q=(pc._q||Promise.resolve()).then(()=>handleSig(pc,k,d)).catch(()=>{});   // one message at a time, in order
+}
+async function handleSig(pc,k,d){
   if(d.d){
+    const clash=d.d.type=='offer'&&(pc._m||pc.signalingState!='stable');
+    pc._ign=!pc._pol&&clash;
+    if(pc._ign)return;
+    if(clash&&pc.signalingState!='stable'){try{await pc.setLocalDescription({type:'rollback'})}catch{}}   // polite side drops its own offer and takes theirs
     await pc.setRemoteDescription(d.d);
+    pc._ready=true;
     if(d.d.type=='offer'){await pc.setLocalDescription(await pc.createAnswer());tx({t:'sig',to:k,data:{d:pc.localDescription}})}
-  }else if(d.c)try{await pc.addIceCandidate(d.c)}catch{}
+  }else if(d.c){try{await pc.addIceCandidate(d.c)}catch(e){if(!pc._ign)throw e}}
 }
 </script></body></html>
