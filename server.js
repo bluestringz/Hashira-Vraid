@@ -1,23 +1,57 @@
 const express = require('express'), http = require('http'), { WebSocketServer } = require('ws');
 const crypto = require('crypto'), fs = require('fs'), path = require('path');
+const { Pool } = require('pg');
 
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
-const ALL = ['channels', 'kick', 'private'];
+const ALL = ['channels', 'kick', 'private', 'assign'];
+const STAFF = ['channels', 'kick', 'assign'];
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
   roles: {
     default: { name: 'Default', color: '#8a8a94', perms: [] },
     verified: { name: 'Verified', color: '#2f9e6b', perms: ['private'] },
-    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private'] }
+    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign'] }
   },
+  cats: [{ id: 'text', name: 'Text Channels' }, { id: 'voice', name: 'Voice Channels' }],
   channels: [
-    { id: 'open', name: 'OPEN CHAT', type: 'text', open: true },
-    { id: 'verified-chat', name: 'Verified Chat', type: 'text', open: false },
-    { id: 'raid-room', name: 'Raid Room', type: 'voice', open: false }
+    { id: 'open', name: 'OPEN CHAT', type: 'text', open: true, cat: 'text' },
+    { id: 'verified-chat', name: 'Verified Chat', type: 'text', open: false, cat: 'text' },
+    { id: 'raid-room', name: 'Raid Room', type: 'voice', open: false, cat: 'voice' }
   ]
 };
-try { db = { ...db, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; } catch {}
-const save = () => { try { fs.writeFileSync(FILE, JSON.stringify(db)); } catch (e) { console.log('save failed:', e.message); } };
+
+// ---- Storage ----
+// If DATABASE_URL is set, everything is stored in Postgres (survives redeploys and restarts).
+// Otherwise it falls back to data.json (local testing, or a Render persistent disk via DATA_DIR).
+const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'off' ? false : { rejectUnauthorized: false } })
+  : null;
+if (pool) pool.on('error', e => console.log('db pool error:', e.message));
+let ready = false, timer = null, writing = Promise.resolve();
+
+async function load() {
+  let saved = null;
+  if (pool) {
+    await pool.query('CREATE TABLE IF NOT EXISTS store (id INT PRIMARY KEY, data JSONB NOT NULL)');
+    const r = await pool.query('SELECT data FROM store WHERE id = 1');
+    if (r.rows[0]) saved = r.rows[0].data;
+  } else {
+    try { saved = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch {}
+  }
+  if (saved) db = { ...db, ...saved };
+  ready = true;
+}
+function flush() {
+  clearTimeout(timer); timer = null;
+  if (!ready) return Promise.resolve();   // never overwrite stored data before it was loaded
+  const json = JSON.stringify(db);
+  if (!pool) { try { fs.writeFileSync(FILE, json); } catch (e) { console.log('save failed:', e.message); } return Promise.resolve(); }
+  writing = writing
+    .then(() => pool.query('INSERT INTO store (id, data) VALUES (1, $1::jsonb) ON CONFLICT (id) DO UPDATE SET data = $1::jsonb', [json]))
+    .catch(e => console.log('save failed:', e.message));
+  return writing;
+}
+const save = () => { if (!timer) timer = setTimeout(flush, 300); };
 
 const hash = (p, s = crypto.randomBytes(16).toString('hex')) => s + ':' + crypto.scryptSync(p, s, 32).toString('hex');
 const same = (p, h) => { const a = Buffer.from(hash(p, h.split(':')[0])), b = Buffer.from(h); return a.length === b.length && crypto.timingSafeEqual(a, b); };
@@ -25,9 +59,11 @@ const U = k => (Object.hasOwn(db.users, k) ? db.users[k] : null);
 
 // Admin account (first account). Set ADMIN_USER / ADMIN_PASS in Render to override.
 const AU = (process.env.ADMIN_USER || 'admin').toLowerCase();
-if (!U(AU) || process.env.ADMIN_PASS) {
-  db.users[AU] = { ...(U(AU) || { name: AU }), role: 'admin', pass: hash(process.env.ADMIN_PASS || '@Qaz123qaz') };
-  save();
+function seedAdmin() {
+  if (!U(AU) || process.env.ADMIN_PASS) {
+    db.users[AU] = { ...(U(AU) || { name: AU }), role: 'admin', pass: hash(process.env.ADMIN_PASS || '@Qaz123qaz') };
+    save();
+  }
 }
 
 const app = express();
@@ -78,7 +114,7 @@ function push() {
   const roles = { admin: { name: 'Admin', color: '#b8860b', perms: ALL }, ...db.roles };
   live().forEach(w => send(w, {
     t: 'state', me: { key: w.key, role: db.users[w.key].role, perms: P(w.key) },
-    roles, users, voice, vs, channels: db.channels.filter(c => can(w.key, c))
+    roles, users, voice, vs, cats: db.cats, channels: db.channels.filter(c => can(w.key, c))
   }));
 }
 
@@ -94,14 +130,14 @@ wss.on('connection', (w, req) => {
 function handle(w, m) {
   const k = w.key, u = db.users[k], adm = u.role === 'admin', has = p => P(k).includes(p);
   const okTarget = t => t && t !== k && U(t) && U(t).role !== 'admin' &&
-    (adm || !(db.roles[U(t).role] || { perms: [] }).perms.includes('kick'));
+    (adm || !(db.roles[U(t).role] || { perms: [] }).perms.some(p => STAFF.includes(p)));
   const done = () => { save(); push(); };
   switch (m.t) {
     case 'open': { const c = chan(m.ch); if (can(k, c)) send(w, { t: 'history', ch: c.id, msgs: db.msgs[c.id] || [] }); break; }
     case 'chat': {
       const c = chan(m.ch), text = String(m.text || '').trim().slice(0, 500);
       if (!can(k, c) || !text) break;
-      const msg = { key: k, name: u.name, text, ts: Date.now() };
+      const msg = { id: crypto.randomBytes(4).toString('hex'), key: k, name: u.name, text, ts: Date.now() };
       db.msgs[c.id] = (db.msgs[c.id] || []).concat(msg).slice(-100); save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'chat', ch: c.id, msg }));
       break;
@@ -128,7 +164,7 @@ function handle(w, m) {
     case 'addch': {
       const name = String(m.name || '').trim().slice(0, 30);
       if (!has('channels') || !name) break;
-      db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !!m.open });
+      db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !!m.open, cat: db.cats.some(x => x.id === m.cat) ? m.cat : '' });
       done(); break;
     }
     case 'renamech': {
@@ -136,7 +172,58 @@ function handle(w, m) {
       if (has('channels') && c && name) { c.name = name; done(); }
       break;
     }
-    case 'delch': if (adm && m.id !== 'open') { db.channels = db.channels.filter(c => c.id !== m.id); done(); } break;
+    case 'delch':
+      if (has('channels') && m.id !== 'open' && chan(m.id)) { db.channels = db.channels.filter(c => c.id !== m.id); delete db.msgs[m.id]; done(); }
+      break;
+    case 'addcat': {
+      const name = String(m.name || '').trim().slice(0, 30);
+      if (!has('channels') || !name) break;
+      db.cats.push({ id: crypto.randomBytes(4).toString('hex'), name }); done(); break;
+    }
+    case 'renamecat': {
+      const c = db.cats.find(x => x.id === m.id), name = String(m.name || '').trim().slice(0, 30);
+      if (has('channels') && c && name) { c.name = name; done(); }
+      break;
+    }
+    case 'delcat':
+      if (has('channels') && db.cats.some(x => x.id === m.id)) {
+        db.cats = db.cats.filter(x => x.id !== m.id);
+        db.channels.forEach(c => { if (c.cat === m.id) c.cat = ''; });
+        done();
+      }
+      break;
+    case 'move': {
+      if (!has('channels')) break;
+      if (m.kind === 'ch') {
+        const c = chan(m.id);
+        if (!c || (m.cat && !db.cats.some(x => x.id === m.cat))) break;
+        db.channels = db.channels.filter(x => x !== c);
+        c.cat = m.cat || '';
+        const i = db.channels.findIndex(x => x.id === m.before);
+        if (i < 0) db.channels.push(c); else db.channels.splice(i, 0, c);
+      } else if (m.kind === 'cat') {
+        const c = db.cats.find(x => x.id === m.id);
+        if (!c) break;
+        db.cats = db.cats.filter(x => x !== c);
+        const i = db.cats.findIndex(x => x.id === m.before);
+        if (i < 0) db.cats.push(c); else db.cats.splice(i, 0, c);
+      }
+      done(); break;
+    }
+    case 'delmsg': {
+      const c = chan(m.ch);
+      if (!adm || !c) break;
+      db.msgs[c.id] = (db.msgs[c.id] || []).filter(x => (x.id || x.ts) !== m.id); save();
+      live().forEach(x => can(x.key, c) && send(x, { t: 'del', ch: c.id, id: m.id }));
+      break;
+    }
+    case 'clear': {
+      const c = chan(m.ch);
+      if (!adm || !c) break;
+      db.msgs[c.id] = []; save();
+      live().forEach(x => can(x.key, c) && send(x, { t: 'clear', ch: c.id }));
+      break;
+    }
     case 'kick': case 'ban': {
       if (!has('kick') || !okTarget(m.key)) break;
       if (m.t === 'ban') { db.banned[m.key] = 1; for (const t in db.sessions) if (db.sessions[t] === m.key) delete db.sessions[t]; }
@@ -144,9 +231,13 @@ function handle(w, m) {
       done(); break;
     }
     case 'unban': if (adm && db.banned[m.key]) { delete db.banned[m.key]; done(); } break;
-    case 'setrole':
-      if (adm && U(m.key) && U(m.key).role !== 'admin' && Object.hasOwn(db.roles, m.role)) { U(m.key).role = m.role; done(); }
+    case 'setrole': {
+      const t = U(m.key), r = Object.hasOwn(db.roles, m.role) ? db.roles[m.role] : null;
+      if (!t || !r) break;
+      // admin: any role. Others with "assign": only non-staff roles, only on non-staff users.
+      if (adm ? t.role !== 'admin' : has('assign') && okTarget(m.key) && !r.perms.some(p => STAFF.includes(p))) { t.role = m.role; done(); }
       break;
+    }
     case 'role': {
       const name = String(m.name || '').trim().slice(0, 20);
       if (!adm || !name) break;
@@ -164,4 +255,11 @@ function handle(w, m) {
   }
 }
 
-server.listen(process.env.PORT || 3000, () => console.log('Hashira VRaid running'));
+async function boot() {
+  try { await load(); }
+  catch (e) { console.error('Could not load saved data, not starting (it would overwrite it):', e.message); process.exit(1); }
+  seedAdmin();
+  server.listen(process.env.PORT || 3000, () => console.log('Hashira VRaid running (' + (pool ? 'Postgres' : 'data.json') + ')'));
+}
+boot();
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { await flush(); process.exit(0); });
