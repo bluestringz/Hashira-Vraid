@@ -3,15 +3,15 @@ const crypto = require('crypto'), fs = require('fs'), path = require('path');
 const { Pool } = require('pg');
 
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
-const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect'];
-const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect'];
+const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
+const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
   roles: {
     default: { name: 'Default', color: '#8a8a94', perms: [] },
     verified: { name: 'Verified', color: '#2f9e6b', perms: ['private'] },
-    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign'] }
+    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move'] }
   },
   cats: [{ id: 'text', name: 'Text Channels' }, { id: 'voice', name: 'Voice Channels' }],
   channels: [
@@ -62,11 +62,22 @@ const U = k => (Object.hasOwn(db.users, k) ? db.users[k] : null);
 const AU = (process.env.ADMIN_USER || 'admin').toLowerCase();
 function seedAdmin() {
   db.roles.default = { name: 'Default', color: '#8a8a94', perms: [] };   // permanent: every new account starts here
+  if (!db.mig1) {   // one time: existing Senior role gets the new "move members" permission
+    if (db.roles.senior && !db.roles.senior.perms.includes('move')) db.roles.senior.perms.push('move');
+    db.mig1 = 1;
+  }
+  // Users used to have one `role`; now they have a list of extra roles (Default is implicit for everyone).
+  for (const u of Object.values(db.users)) {
+    if (!Array.isArray(u.roles)) u.roles = u.role && u.role !== 'default' ? [u.role] : [];
+    delete u.role;
+  }
+  db.channels.forEach(c => { if (!Array.isArray(c.roles)) c.roles = []; });   // roles allowed into a channel (empty = the older open/private rule)
   save();
   if (!U(AU) || process.env.ADMIN_PASS) {
-    db.users[AU] = { ...(U(AU) || { name: AU }), role: 'admin', pass: hash(process.env.ADMIN_PASS || '@Qaz123qaz') };
+    db.users[AU] = { ...(U(AU) || { name: AU }), roles: ['admin'], pass: hash(process.env.ADMIN_PASS || '@Qaz123qaz') };
     save();
   }
+  if (U(AU) && !U(AU).roles.includes('admin')) { U(AU).roles.push('admin'); save(); }
 }
 
 const app = express();
@@ -87,7 +98,7 @@ app.post('/api/auth', (req, res) => {
   if (mode === 'register') {
     if (pw.length < 6) return bad('Password: at least 6 characters');
     if (U(k)) return bad('Username is already taken');
-    db.users[k] = { name, pass: hash(pw), role: 'default' };
+    db.users[k] = { name, pass: hash(pw), roles: [] };
   } else if (!U(k) || !same(pw, U(k).pass)) return bad('Wrong username or password');
   if (db.banned[k]) return bad('This account is banned');
   // A new login signs out every other device/browser of this account.
@@ -102,15 +113,28 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 200000 });
 const send = (w, o) => w.readyState === 1 && w.send(JSON.stringify(o));
 const live = () => [...wss.clients].filter(w => w.key);
-const P = k => (db.users[k].role === 'admin' ? ALL : (db.roles[db.users[k].role] || db.roles.default).perms);
+const isAdm = k => db.users[k].roles.includes('admin');
+const eff = k => (isAdm(k) ? ['admin'] : ['default', ...db.users[k].roles.filter(r => Object.hasOwn(db.roles, r))]);   // every role the user has (Default always)
+const P = k => (isAdm(k) ? ALL : [...new Set(eff(k).flatMap(r => db.roles[r].perms))]);   // permissions add up across roles
+const roleName = id => (id === 'admin' ? 'Admin' : db.roles[id] ? db.roles[id].name : id);
+const rank = id => (id === 'admin' ? 1e3 : id === 'default' ? -1 : db.roles[id] ? db.roles[id].perms.length : 0);
+const primary = k => eff(k).slice().sort((a, b) => rank(b) - rank(a) || roleName(a).localeCompare(roleName(b)))[0];   // the role shown in lists and tags
 const chan = id => db.channels.find(c => c.id === id);
-const can = (k, c) => c && (c.open || P(k).includes('private'));
+// Who can see/enter a channel: admins always; if the channel lists roles, only people with one of them; otherwise open, or the "private" permission.
+const can = (k, c) => {
+  if (!c) return false;
+  if (isAdm(k)) return true;
+  if (c.roles && c.roles.length) return c.roles.some(r => eff(k).includes(r));
+  return c.open || P(k).includes('private');
+};
+const cleanRoles = a => [...new Set((Array.isArray(a) ? a : []).filter(r => typeof r === 'string' && r !== 'admin' && r !== 'default' && Object.hasOwn(db.roles, r)))];
 
 // Move a socket in/out of a voice channel and tell the others in that channel (used for the join/leave sounds).
 function setVoice(w, ch) {
   const old = w.voice;
   if (old === ch) return;
   w.voice = ch;
+  if (!ch) { w.cam = null; w.scr = null; }
   live().forEach(x => {
     if (x === w) return;
     if (old && x.voice === old) send(x, { t: 'vev', ev: 'leave', key: w.key });
@@ -131,14 +155,14 @@ function push() {
   live().forEach(w => {
     if (!w.voice) return;
     (voice[w.voice] = voice[w.voice] || []).push(w.key);
-    if (w.m || w.d) vs[w.key] = { m: !!w.m, d: !!w.d };
+    if (w.m || w.d || w.cam || w.scr) vs[w.key] = { m: !!w.m, d: !!w.d, cam: w.cam || null, scr: w.scr || null };
   });
   const users = Object.entries(db.users).map(([key, u]) => ({
-    key, name: u.name, role: u.role, av: u.av || 0, banned: !!db.banned[key], on: live().some(w => w.key === key)
+    key, name: u.name, role: primary(key), roles: u.roles, av: u.av || 0, banned: !!db.banned[key], on: live().some(w => w.key === key)
   }));
   const roles = { admin: { name: 'Admin', color: '#b8860b', perms: ALL }, ...db.roles };
   live().forEach(w => send(w, {
-    t: 'state', me: { key: w.key, role: db.users[w.key].role, perms: P(w.key), sv: srv[w.key] || {} },
+    t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
     roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c))
   }));
 }
@@ -154,9 +178,8 @@ wss.on('connection', (w, req) => {
 });
 
 function handle(w, m) {
-  const k = w.key, u = db.users[k], adm = u.role === 'admin', has = p => P(k).includes(p);
-  const okTarget = t => t && t !== k && U(t) && U(t).role !== 'admin' &&
-    (adm || !(db.roles[U(t).role] || { perms: [] }).perms.some(p => STAFF.includes(p)));
+  const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p);
+  const okTarget = t => t && t !== k && U(t) && !isAdm(t) && (adm || !P(t).some(p => STAFF.includes(p)));
   const done = () => { save(); push(); };
   switch (m.t) {
     case 'open': { const c = chan(m.ch); if (can(k, c)) send(w, { t: 'history', ch: c.id, msgs: db.msgs[c.id] || [] }); break; }
@@ -177,7 +200,11 @@ function handle(w, m) {
     }
     case 'leave': setVoice(w, null); push(); break;
     case 'sig': { const p = live().find(x => x.key === m.to && x.voice && x.voice === w.voice); p && send(p, { t: 'sig', from: k, data: m.data }); break; }
-    case 'vs': w.m = !!m.m; w.d = !!m.d; push(); break;
+    case 'vs':
+      w.m = !!m.m; w.d = !!m.d;
+      w.cam = typeof m.cam === 'string' ? m.cam.slice(0, 80) : null;   // ids of the camera / screen-share streams, so others know which video is which
+      w.scr = typeof m.scr === 'string' ? m.scr.slice(0, 80) : null;
+      push(); break;
     case 'setname': {
       const name = String(m.name || '').trim().replace(/\s+/g, ' '), l = name.toLowerCase();
       if (!/^[\w .-]{3,20}$/.test(name)) return send(w, { t: 'error', msg: 'Name: 3-20 letters, numbers, spaces, . _ -' });
@@ -190,7 +217,15 @@ function handle(w, m) {
     case 'addch': {
       const name = String(m.name || '').trim().slice(0, 30);
       if (!has('channels') || !name) break;
-      db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !!m.open, cat: db.cats.some(x => x.id === m.cat) ? m.cat : '' });
+      const roles = cleanRoles(m.roles);
+      db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !roles.length && !!m.open, roles, cat: db.cats.some(x => x.id === m.cat) ? m.cat : '' });
+      done(); break;
+    }
+    case 'chaccess': {   // who can see and enter one channel
+      const c = chan(m.id);
+      if (!has('channels') || !c) break;
+      if (c.id === 'open') return send(w, { t: 'error', msg: 'OPEN CHAT must stay open to everyone' });
+      c.roles = cleanRoles(m.roles); c.open = !c.roles.length && !!m.open;
       done(); break;
     }
     case 'renamech': {
@@ -257,12 +292,14 @@ function handle(w, m) {
       done(); break;
     }
     case 'unban': if (adm && db.banned[m.key]) { delete db.banned[m.key]; done(); } break;
-    case 'setrole': {
-      const t = U(m.key), r = Object.hasOwn(db.roles, m.role) ? db.roles[m.role] : null;
-      if (!t || !r) break;
-      // admin: any role. Others with "assign": only non-staff roles, only on non-staff users.
-      if (adm ? t.role !== 'admin' : has('assign') && okTarget(m.key) && !r.perms.some(p => STAFF.includes(p))) { t.role = m.role; done(); }
-      break;
+    case 'togglerole': {   // add or remove one role; a person can have as many as needed
+      const t = U(m.key), rid = String(m.role), r = Object.hasOwn(db.roles, rid) ? db.roles[rid] : null;
+      if (!t || !r || rid === 'default') break;
+      // admin: any role on anyone but admins. Others with "assign": only non-staff roles, only on non-staff people.
+      if (!(adm ? !isAdm(m.key) : has('assign') && okTarget(m.key) && !r.perms.some(p => STAFF.includes(p)))) break;
+      const set = new Set(t.roles);
+      if (m.on) set.add(rid); else set.delete(rid);
+      t.roles = [...set]; done(); break;
     }
     case 'role': {
       const name = String(m.name || '').trim().slice(0, 20), mine = P(k);
@@ -281,7 +318,8 @@ function handle(w, m) {
       const old = Object.hasOwn(db.roles, m.id) ? db.roles[m.id] : null;
       if (!has('roles') || !old || m.id === 'default' || !old.perms.every(p => P(k).includes(p))) break;
       delete db.roles[m.id];
-      Object.values(db.users).forEach(x => { if (x.role === m.id) x.role = 'default'; });
+      Object.values(db.users).forEach(x => { x.roles = x.roles.filter(r => r !== m.id); });
+      db.channels.forEach(c => { c.roles = (c.roles || []).filter(r => r !== m.id); });
       done(); break;
     }
     case 'smute': case 'sdeaf': {
@@ -291,6 +329,16 @@ function handle(w, m) {
       const s = srv[m.key] = srv[m.key] || {};
       s[f] = on;
       if (!s.m && !s.d) delete srv[m.key];
+      push(); break;
+    }
+    case 'vmove': {
+      if (!has('move') || !okTarget(m.key)) break;
+      const c = chan(m.ch), t = live().find(x => x.key === m.key && x.voice);
+      if (!c || c.type !== 'voice' || !t || t.voice === c.id) break;
+      if (!can(m.key, c)) return send(w, { t: 'error', msg: 'That member cannot access that channel' });
+      setVoice(t, c.id);
+      send(t, { t: 'moved', ch: c.id });
+      send(t, { t: 'peers', peers: live().filter(x => x !== t && x.voice === c.id).map(x => x.key) });
       push(); break;
     }
     case 'vkick': {
