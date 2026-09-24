@@ -58,10 +58,14 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .dt{box-shadow:inset 0 2px 0 var(--red)}.db{box-shadow:inset 0 -2px 0 var(--red)}
 #send{display:flex;gap:8px;padding:12px}
 #vbox{flex:1;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-content:flex-start;overflow:auto}
-.bar{width:100%;display:flex;gap:8px}
+.bar{width:100%;display:flex;flex-wrap:wrap;gap:8px}
 .vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
 .vc button{font-size:11px;padding:2px 6px}
 .lmrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.meter{height:10px;background:var(--pan2);border-radius:5px;overflow:hidden}.meter i{display:block;height:100%;width:0;background:#3ba55d;transition:width .08s}
+.cst{font-size:11px;color:var(--mut)}.cst.bad{color:#ff5a67}
+.help{background:var(--pan2);border:1px solid var(--red);border-radius:8px;padding:10px;width:100%;display:grid;gap:6px}
+#sndfix{position:fixed;left:50%;top:12px;transform:translateX(-50%);background:var(--red);color:#fff;padding:8px 14px;border-radius:8px;z-index:30;cursor:pointer;max-width:92vw;text-align:center}
 .more{opacity:0;margin-left:auto}.ch:hover .more,.sec:hover .more{opacity:1}@media(hover:none){.more{opacity:1}}
 .dropin{box-shadow:inset 0 0 0 2px var(--red);background:var(--pan2)}
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;width:100%}
@@ -153,6 +157,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 <div id="modal" class="hide"></div>
 <div id="ctx" class="hide"></div>
 <div id="toast" class="hide"></div>
+<div id="sndfix" class="hide">🔇 Your browser is blocking sound. Tap here to turn it on.</div>
 <input type="file" id="file" accept="image/*" class="hide">
 
 <script>
@@ -461,6 +466,7 @@ function settings(){
   const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
   const pic=E('button',0,'Change profile picture');pic.onclick=()=>{close();$('#file').click()};
   const items=[E('label',0,'Display name'),n,E('small',0,'Your login username stays "'+S.me.key+'".'),sv,pic];
+  const au=E('button',0,'Audio setup (microphone, speakers, connection test)');au.onclick=audioSetup;items.push(au);
   items.push(E('label',0,'Muted for me (only you stop hearing them)'));
   if(!lmute.size)items.push(E('small',0,'Nobody. Right-click a person, or use the button under them in the voice panel.'));
   [...lmute].forEach(k=>{const u=S.users.find(x=>x.key==k),row=E('div','lmrow'),b=E('button',0,'Unmute');row.append(E('span',0,u?u.name:k),b);b.onclick=()=>{toggleLM(k);settings()};items.push(row)});
@@ -535,7 +541,7 @@ function userMenu(e,u){
   const vi=voiceItems(u);if(vi.length)it.push(null,...vi);
   if(it.length>1)ctx(e,it);
 }
-const unlock=()=>{try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state!='running')actx.resume()}catch{}};
+const unlock=()=>{try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state!='running')actx.resume()}catch{}playAll()};
 ['click','keydown','touchstart'].forEach(ev=>addEventListener(ev,unlock,{passive:true}));
 // Optional: put your own join.mp3 and leave.mp3 in public/sounds/ and they are used instead of the built-in tones.
 const sfx={};
@@ -554,6 +560,105 @@ function sfxPlay(n,notes){
 const sJoin=()=>sfxPlay('join',[[587,0],[880,.1]]),sLeave=()=>sfxPlay('leave',[[784,0],[523,.1]]);
 
 /* ---------- Voice (WebRTC mesh, best for small groups) ---------- */
+/* ---------- Audio setup, connection test and relay servers ---------- */
+let ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'}],relay:false,at:0};
+async function loadIce(force){
+  if(!force&&Date.now()-ICE.at<3600e3)return;
+  try{const r=await fetch('/api/ice',{headers:{Authorization:'Bearer '+tok}});if(r.ok){ICE=await r.json();ICE.at=Date.now()}}catch{}
+}
+const pcState={};
+function stChip(k){
+  if(k==S.me.key||vc!=cur.id)return null;
+  const s=pcState[k];if(!s||s=='connected'||s=='completed')return null;
+  return E('small','cst'+(s=='failed'?' bad':''),s=='failed'?"Can't connect":'Connecting…');
+}
+const pref={mic:'',spk:''};try{pref.mic=localStorage.mic||'';pref.spk=localStorage.spk||''}catch{}
+const savePref=()=>{try{localStorage.mic=pref.mic;localStorage.spk=pref.spk}catch{}};
+let isBrave=false;try{navigator.brave&&navigator.brave.isBrave().then(v=>isBrave=!!v)}catch{}
+const micConstraints=()=>({audio:Object.assign({echoCancellation:true,noiseSuppression:true,autoGainControl:true},pref.mic?{deviceId:{ideal:pref.mic}}:{})});
+function setSink(a){if(pref.spk&&a.setSinkId)a.setSinkId(pref.spk).catch(()=>{})}
+function playAll(){Object.values(auds).forEach(a=>{const p=a.play&&a.play();if(p&&p.then)p.then(()=>$('#sndfix').classList.add('hide')).catch(()=>{})})}
+$('#sndfix').onclick=playAll;
+function micError(e){
+  const n=(e&&e.name)||'',t=[];
+  if(!window.isSecureContext||!navigator.mediaDevices)t.push('The browser blocked the microphone because this page is not secure. Open the site with https://');
+  else if(n=='NotAllowedError'||n=='SecurityError')t.push('This site is not allowed to use your microphone.','Click the lock (or tune) icon at the left of the address bar, open Site settings, set Microphone to Allow, then reload the page.');
+  else if(n=='NotFoundError'||n=='OverconstrainedError')t.push('No microphone was found. Plug one in, or pick another one in Audio setup.');
+  else if(n=='NotReadableError'||n=='AbortError')t.push('Your microphone is busy or blocked by the system. Close other apps that use it (Zoom, Discord, a game) and try again. On Windows, also check Settings, Privacy, Microphone.');
+  else t.push('Could not start the microphone ('+(n||'unknown error')+').');
+  if(isBrave)t.push('Brave: also open brave://settings/content/microphone and make sure this site is allowed.');
+  const b=E('button','p','Open audio setup');b.onclick=audioSetup;
+  modal('Microphone problem',...t.map(x=>E('p',0,x)),b);
+}
+let _tone;
+function toneUrl(){   // a short two-note chime as a WAV file, so the speaker test also works on the speaker you picked
+  if(_tone)return _tone;
+  const sr=22050,n=Math.floor(sr*.7),b=new DataView(new ArrayBuffer(44+n*2)),w=(o,x)=>[...x].forEach((c,i)=>b.setUint8(o+i,c.charCodeAt(0)));
+  w(0,'RIFF');b.setUint32(4,36+n*2,true);w(8,'WAVEfmt ');b.setUint32(16,16,true);b.setUint16(20,1,true);b.setUint16(22,1,true);b.setUint32(24,sr,true);b.setUint32(28,sr*2,true);b.setUint16(32,2,true);b.setUint16(34,16,true);w(36,'data');b.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){const t=i/sr,u=t<.3?t:t-.3,f=t<.3?587:880;b.setInt16(44+i*2,Math.sin(2*Math.PI*f*t)*Math.min(1,u/.02)*Math.exp(-u*7)*9000,true)}
+  return _tone=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));
+}
+async function switchMic(){   // change microphone while in a call
+  let s;try{s=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){return micError(e)}
+  const t=s.getAudioTracks()[0];
+  Object.values(pcs).forEach(pc=>pc.getSenders().forEach(x=>{if(x.track&&x.track.kind=='audio')x.replaceTrack(t).catch(()=>{})}));
+  const old=local;unwatch(S.me.key);local=s;applyMic();watch(S.me.key,local);
+  if(old)old.getTracks().forEach(x=>x.stop());
+}
+async function netTest(out){
+  out.textContent='Testing your connection…';
+  await loadIce(true);
+  const found={};let pc;
+  try{
+    pc=new RTCPeerConnection({iceServers:ICE.iceServers});pc.createDataChannel('t');
+    pc.onicecandidate=e=>{if(e.candidate){const m=/ typ (\w+)/.exec(e.candidate.candidate);if(m)found[m[1]]=1}};
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise(r=>{if(pc.iceGatheringState=='complete')return r();const t=setTimeout(r,5000);pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState=='complete'){clearTimeout(t);r()}}});
+  }catch(e){out.textContent='This browser could not run the test ('+((e&&e.name)||'error')+'). WebRTC may be turned off or blocked.';return}
+  finally{try{pc&&pc.close()}catch{}}
+  const L=[];
+  if(!found.host&&!found.srflx&&!found.relay)L.push('✗ No connection candidates at all. WebRTC looks turned off or blocked in this browser.');
+  else L.push(found.srflx?'✓ Public address found: direct calls should work.':'✗ No public address found. Something is blocking WebRTC: the browser privacy setting, a VPN, or a firewall.');
+  L.push(ICE.relay?(found.relay?'✓ Relay reachable: calls also work on strict networks.':'✗ A relay is set up on the server but this network cannot reach it.'):'• The server has no relay (TURN) yet, so people on strict networks cannot be connected. The admin can add one.');
+  if(isBrave)L.push('Brave: open brave://settings, search "WebRTC" and set "WebRTC IP handling policy" to "Default public interface only".');
+  out.textContent=L.join('\n');
+}
+async function audioSetup(){
+  const bar=E('i'),meter=E('div','meter'),status=E('small',0,'Say something…'),msel=E('select'),ssel=E('select'),net=E('div');
+  meter.append(bar);net.style.cssText='white-space:pre-wrap;font-size:13px';
+  let stream=null,src=null,an2=null,buf=null,heard=0,t0=Date.now();
+  const stopMeter=()=>{if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;if(src){try{src.disconnect()}catch{}}src=null;an2=null};
+  const startMeter=async()=>{
+    stopMeter();heard=0;t0=Date.now();
+    try{stream=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){status.textContent='Cannot open the microphone ('+((e&&e.name)||'error')+'). Check the browser permission for this site.';return}
+    try{unlock();src=actx.createMediaStreamSource(stream);an2=actx.createAnalyser();an2.fftSize=512;buf=new Uint8Array(an2.fftSize);src.connect(an2)}catch{}
+  };
+  const fill=async()=>{
+    let ds=[];try{ds=await navigator.mediaDevices.enumerateDevices()}catch{}
+    const opt=(sel,list,cur,name)=>{sel.replaceChildren();list.forEach((d,i)=>{const o=E('option',0,d.label||name+' '+(i+1));o.value=d.deviceId;sel.append(o)});if(cur&&list.some(d=>d.deviceId==cur))sel.value=cur};
+    opt(msel,ds.filter(d=>d.kind=='audioinput'),pref.mic,'Microphone');
+    opt(ssel,ds.filter(d=>d.kind=='audiooutput'),pref.spk,'Speaker');
+  };
+  msel.onchange=async()=>{pref.mic=msel.value;savePref();await startMeter();if(vc&&local)switchMic()};
+  const canSink=!!(window.HTMLMediaElement&&HTMLMediaElement.prototype.setSinkId);
+  ssel.onchange=()=>{pref.spk=ssel.value;savePref();Object.values(auds).forEach(setSink)};
+  const test=E('button',0,'Play test sound');test.onclick=()=>{const a=new Audio(toneUrl());setSink(a);const p=a.play();p&&p.catch&&p.catch(()=>{})};
+  const nb=E('button','p','Run connection test');nb.onclick=()=>netTest(net);
+  const items=[E('label',0,'Microphone'),msel,meter,status,E('label',0,'Speakers'),ssel];
+  if(!canSink){ssel.disabled=true;items.push(E('small',0,'This browser plays sound on the system default speaker. Chrome, Edge and Brave can choose one here.'))}
+  items.push(test,E('label',0,'Connection'),nb,net);
+  if(isBrave)items.push(E('small',0,'Brave tip: if people cannot hear each other, open brave://settings, search "WebRTC" and set "WebRTC IP handling policy" to "Default public interface only". Also allow the microphone for this site.'));
+  modal('Audio setup',...items);
+  await startMeter();await fill();
+  const iv=setInterval(()=>{
+    if(!meter.isConnected||$('#modal').classList.contains('hide')){clearInterval(iv);stopMeter();return}
+    if(!an2)return;
+    an2.getByteTimeDomainData(buf);let sum=0;for(const v of buf){const d=(v-128)/128;sum+=d*d}
+    const r=Math.sqrt(sum/buf.length);bar.style.width=Math.min(100,r*400)+'%';if(r>0.03)heard++;
+    status.textContent=heard>8?'✓ Your microphone works. Others can hear you.':Date.now()-t0>6000?'No sound yet. Check the microphone chosen above, and that it is not muted in your system.':'Say something…';
+  },100);
+}
+
 /* ---------- Voice panel: people and video tiles ---------- */
 const vst={},vel={};let camS=null,scrS=null,focusT=null;   // vst: remote video streams per person, vel: cached <video> elements (so they don't restart on every redraw)
 function sendVS(){tx({t:'vs',m:muted,d:deaf,cam:camS?camS.id:null,scr:scrS?scrS.id:null})}
@@ -572,6 +677,7 @@ function vtile(u,x,used){
   if(!v){v=document.createElement('video');v.autoplay=true;v.playsInline=true;v.muted=true;v.srcObject=x.stream;vel[key]=v}
   used.add(key);
   d.append(v,E('div','vl',u.name+(x.kind=='scr'?' (screen)':'')));
+  const sc=stChip(u.key);if(sc){sc.style.cssText='position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.6);padding:2px 6px;border-radius:5px';d.append(sc)}
   d.onclick=()=>{focusT=focusT==x.id?null:x.id;panel()};d.oncontextmenu=e=>userMenu(e,u);
   setTimeout(()=>{const p=v.play&&v.play();p&&p.catch&&p.catch(()=>{})},0);
   return d;
@@ -580,6 +686,7 @@ function atile(u){
   const k=u.key,c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));
   const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}
   if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(b)}
+  const sc=stChip(k);if(sc)c.append(sc);
   return c;
 }
 function panel(){
@@ -590,7 +697,15 @@ function panel(){
     const cb=E('button',0,camS?'Turn off camera':'Turn on camera');cb.onclick=toggleCam;bar.append(cb);
     if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia){const sb=E('button',0,scrS?'Stop sharing':'Share screen');sb.onclick=toggleScreen;bar.append(sb)}
   }
+  const ab=E('button',0,'Audio setup');ab.onclick=audioSetup;bar.append(ab);
   v.append(bar);
+  const failed=inV?Object.entries(pcState).filter(([k,st])=>st=='failed'&&(S.voice[vc]||[]).includes(k)).map(([k])=>(S.users.find(u=>u.key==k)||{name:k}).name):[];
+  if(failed.length){
+    const h=E('div','help');h.append(E('b',0,"Can't connect the audio with "+failed.join(', ')+'.'));
+    h.append(E('small',0,ICE.relay?'The app already tried the relay. Ask them to open Audio setup and run the connection test.':"Their network or browser is blocking direct calls. The server admin needs to add a relay (TURN)."));
+    if(isBrave)h.append(E('small',0,'Brave: open brave://settings, search "WebRTC", set "WebRTC IP handling policy" to "Default public interface only", then reload the page.'));
+    const b=E('button',0,'Audio setup and connection test');b.onclick=audioSetup;h.append(b);v.append(h);
+  }
   const grid=E('div','vgrid'),used=new Set();
   (S.voice[cur.id]||[]).forEach(k=>{
     const u=S.users.find(x=>x.key==k);if(!u)return;
@@ -636,8 +751,9 @@ function stopVideo(kind){
 
 /* ---------- Voice connections (WebRTC mesh, best for small groups) ---------- */
 async function joinVoice(id){
-  try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
-  catch{return alert('Microphone permission and HTTPS are required.')}
+  try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia(micConstraints())}
+  catch(e){return micError(e)}
+  await loadIce();
   vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});sendVS();sJoin();
 }
 function leaveVoice(quiet){
@@ -647,21 +763,38 @@ function leaveVoice(quiet){
   local=null;if(vc&&!quiet){tx({t:'leave'});sLeave()}
   vc=null;if(S&&cur)render();
 }
-function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function closePeer(k){unwatch(k);pcs[k]&&pcs[k].close();delete pcs[k];delete vst[k];delete pcState[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
 function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
 function mk(k,init){
-  const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pcs[k]=pc;
+  const pc=new RTCPeerConnection({iceServers:ICE.iceServers});pcs[k]=pc;
+  // If the connection fails or drops: retry, and as a last resort send everything through the relay.
+  pc._tries=0;pc._rst=false;
+  const heal=()=>{
+    if(pcs[k]!==pc||pc._tries>=2)return;
+    pc._tries++;
+    if(ICE.relay){try{pc.setConfiguration({iceServers:ICE.iceServers,iceTransportPolicy:'relay'})}catch{}}
+    pc._rst=true;
+    if(pc.restartIce)pc.restartIce();else if(pc.onnegotiationneeded)pc.onnegotiationneeded();
+  };
+  const st=()=>{
+    const s=pc.connectionState||pc.iceConnectionState;pcState[k]=s;
+    if(s=='failed')heal();
+    if(s=='disconnected'){clearTimeout(pc._dt);pc._dt=setTimeout(()=>{if(pcs[k]===pc&&(pc.connectionState||pc.iceConnectionState)=='disconnected')heal()},4000)}
+    if(s=='connected'||s=='completed')pc._tries=0;
+    if(cur&&cur.type=='voice')panel();
+  };
+  pc.onconnectionstatechange=st;pc.oniceconnectionstatechange=st;
   // "Perfect negotiation": either side may renegotiate (camera or screen turned on/off); the side with the smaller key backs off on a clash.
   pc._snd=new Map();pc._m=false;pc._ign=false;pc._pol=S.me.key<k;pc._ready=!!init;
   pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
   pc.ontrack=e=>{
     const st=e.streams[0]||new MediaStream([e.track]);
-    if(e.track.kind=='audio'){const a=auds[k]||(auds[k]=new Audio());a.srcObject=st;a.muted=audioMuted(k);const p=a.play();p&&p.catch&&p.catch(()=>{});watch(k,st)}
+    if(e.track.kind=='audio'){const a=auds[k]||(auds[k]=new Audio());a.srcObject=st;a.muted=audioMuted(k);setSink(a);const p=a.play();p&&p.catch&&p.catch(()=>$('#sndfix').classList.remove('hide'));watch(k,st)}
     else{(vst[k]=vst[k]||new Map()).set(st.id,st);if(cur&&cur.type=='voice')panel()}
   };
   pc.onnegotiationneeded=async()=>{
     if(!pc._ready)return;
-    try{pc._m=true;await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})}
+    try{pc._m=true;await pc.setLocalDescription(await pc.createOffer(pc._rst?{iceRestart:true}:undefined));pc._rst=false;tx({t:'sig',to:k,data:{d:pc.localDescription}})}
     catch{}finally{pc._m=false}
   };
   local.getTracks().forEach(t=>pc.addTrack(t,local));
