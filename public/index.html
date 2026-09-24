@@ -64,6 +64,12 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .mrow.mg{cursor:pointer}.mrow:hover{background:var(--pan2)}
 .mrow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mrow.off{opacity:.5}
+.grp{display:flex;align-items:center;gap:6px;padding:12px 6px 4px;color:var(--mut);font-size:13px;cursor:pointer;user-select:none}
+.grp:first-child{padding-top:2px}
+.grp i{width:8px;height:8px;border-radius:50%;flex:none}
+.grp span{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp small{font-size:12px}
+.grp::after{content:'▾'}.grp.fold::after{content:'▸'}
 .tag{font-size:11px;padding:1px 7px;border-radius:9px;color:#fff}
 .x{padding:1px 7px;font-size:13px}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:12px;z-index:9}
@@ -77,6 +83,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #ctx .dng{color:#ff5a67}#ctx .dng:hover{color:#fff}
 #ctx hr{border:0;border-top:1px solid var(--bd);margin:4px 0;width:100%}
 #ctx .lbl{padding:4px 10px;color:var(--mut);font-size:12px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--solid);border:1px solid var(--red);padding:8px 14px;border-radius:8px;z-index:30;max-width:90vw}
 @media(max-width:800px){#app{grid-template-columns:1fr;grid-template-rows:38vh 1fr}#mem{display:none}#side{border-right:0}}
 </style></head><body>
 
@@ -105,6 +112,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 </div>
 <div id="modal" class="hide"></div>
 <div id="ctx" class="hide"></div>
+<div id="toast" class="hide"></div>
 <input type="file" id="file" accept="image/*" class="hide">
 
 <script>
@@ -127,9 +135,10 @@ function connect(){
   ws.onclose=e=>{
     leaveVoice(true);
     if(e.code>=4000){
-      delete localStorage.tk;tok=null;S=null;
+      if(e.code!=4004)delete localStorage.tk;   // 4004 = signed in elsewhere; keep the token so another tab of this browser keeps working
+      tok=null;S=null;
       $('#app').classList.add('hide');$('#login').classList.remove('hide');
-      $('#err').textContent=e.code==4002?'You were kicked. You can log in again.':e.code==4003?'This account is banned.':'';
+      $('#err').textContent=e.code==4002?'You were kicked. You can log in again.':e.code==4003?'This account is banned.':e.code==4004?'Your account was logged in from another device or browser tab, so this session was disconnected.':'Your session ended. Please log in again.';
     }else setTimeout(connect,2000);
   };
 }
@@ -140,8 +149,9 @@ setInterval(()=>{if(ws&&ws.readyState==1)tx({t:'ping'})},30000);
 
 function on(m){
   if(m.t=='state'){
-    const prev=vc&&S?new Set(S.voice[vc]||[]):null;S=m;
-    if(prev){const now=S.voice[vc]||[];if(now.some(k=>k!=S.me.key&&!prev.has(k)))sJoin();else if([...prev].some(k=>k!=S.me.key&&!now.includes(k)))sLeave()}
+    const os=S?S.me.sv||{}:null;S=m;
+    const ns=S.me.sv||{};if(os){if(!!ns.m!=!!os.m)toast(ns.m?'A moderator muted you':'You can speak again');if(!!ns.d!=!!os.d)toast(ns.d?'A moderator deafened you':'You can hear again')}
+    applyMic();syncAudio();
     $('#login').classList.add('hide');$('#app').classList.remove('hide');
     const same=cur&&S.channels.find(c=>c.id==cur.id);
     if(same)cur=same;else pick(S.channels[0],true);
@@ -150,7 +160,8 @@ function on(m){
   else if(m.t=='chat'&&cur&&m.ch==cur.id)addMsg(m.msg);
   else if(m.t=='peers')m.peers.forEach(k=>mk(k,true));
   else if(m.t=='sig')onSig(m.from,m.data);
-  else if(m.t=='kicked'||m.t=='denied')leaveVoice(true);
+  else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
+  else if(m.t=='kicked'||m.t=='denied'){leaveVoice(true);if(m.by)toast('You were disconnected from voice by a moderator')}
   else if(m.t=='error')alert(m.msg);
   else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
   else if(m.t=='clear'&&cur&&m.ch==cur.id)$('#msgs').replaceChildren();
@@ -216,11 +227,9 @@ function render(){
   const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Change profile picture';a.onclick=()=>$('#file').click();
   const nm=E('b',0,mu.name);nm.style.cursor='pointer';nm.title='Settings';nm.onclick=settings;
   const r1=E('div','r');r1.append(a,nm,tag(me.role));r1.oncontextmenu=e=>userMenu(e,mu);
-  const r2=E('div','r btns'),eff=muted||deaf;
-  const mic=E('button');mic.title=eff?'Unmute':'Mute';mic.append(ico('🎤',eff));
-  mic.onclick=()=>{if(deaf){deaf=false;muted=false}else muted=!muted;setVS()};
-  const hp=E('button');hp.title=deaf?'Undeafen':'Deafen';hp.append(ico('🎧',deaf));
-  hp.onclick=()=>{deaf=!deaf;setVS()};
+  const r2=E('div','r btns'),eff=muted||deaf||svm()||svd();
+  const mic=E('button');mic.title=svm()||svd()?'Muted by a moderator':eff?'Unmute':'Mute';mic.append(ico('🎤',eff));mic.onclick=toggleMute;
+  const hp=E('button');hp.title=svd()?'Deafened by a moderator':deaf?'Undeafen':'Deafen';hp.append(ico('🎧',deaf||svd()));hp.onclick=toggleDeaf;
   const th=E('button',0,'◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
   const st=E('button',0,'⚙');st.title='Settings';st.onclick=settings;
   const lo=E('button',0,'⎋');lo.title='Log out';lo.onclick=()=>{delete localStorage.tk;location.reload()};
@@ -232,22 +241,36 @@ function render(){
   if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
   $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!cur);
   if(cur&&!txt)panel();
-  // members
+  // members, grouped by role (Admin first, Default last, Banned only visible to moderators)
   const M=$('#mlist');M.replaceChildren();
-  S.users.slice().sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).forEach(u=>{
-    const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
-    r.append(avEl(u.key,u.name),E('span',0,u.name+(u.banned?' (ban)':'')),tag(u.role));
-    r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title='Click or right-click to manage';r.onclick=()=>manage(u)}
-    M.append(r);
+  const staffView=me.role=='admin'||P('kick');
+  const rank=id=>id=='admin'?1e3:id=='default'?-1:(S.roles[id]?S.roles[id].perms.length:0);
+  const nameOf=id=>id=='~banned'?'Banned':(S.roles[id]?S.roles[id].name:id);
+  const groups={};
+  S.users.forEach(u=>{if(u.banned&&!staffView)return;const g=u.banned?'~banned':u.role;(groups[g]=groups[g]||[]).push(u)});
+  Object.keys(groups).sort((a,b)=>a=='~banned'?1:b=='~banned'?-1:rank(b)-rank(a)||nameOf(a).localeCompare(nameOf(b))).forEach(g=>{
+    const list=groups[g].sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name));
+    const h=E('div','grp'+(fold.has(g)?' fold':'')),dot=E('i');
+    dot.style.background=g=='~banned'?'#777':(S.roles[g]||{color:'#777'}).color;
+    h.append(dot,E('span',0,nameOf(g)),E('small',0,list.filter(u=>u.on).length+'/'+list.length));
+    h.title='Click to collapse or expand';h.onclick=()=>{fold.has(g)?fold.delete(g):fold.add(g);render()};
+    M.append(h);
+    if(fold.has(g))return;
+    list.forEach(u=>{
+      const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
+      r.append(avEl(u.key,u.name),E('span',0,u.name));
+      r.oncontextmenu=e=>userMenu(e,u);if(mg){r.title='Click or right-click to manage';r.onclick=()=>manage(u)}
+      M.append(r);
+    });
   });
 }
-const STAFF=['channels','kick','assign'];
+const STAFF=['channels','kick','assign','roles','voicemod','disconnect'];
 const staffRole=id=>((S.roles[id]||{perms:[]}).perms||[]).some(x=>STAFF.includes(x));
 function tgtOk(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||!staffRole(u.role))}
 function kickOk(u){return tgtOk(u)&&!u.banned&&S.me.perms.includes('kick')}
 function canAssign(u){return tgtOk(u)&&!u.banned&&(S.me.role=='admin'||S.me.perms.includes('assign'))}
 function assignable(){return Object.entries(S.roles).filter(([i])=>i!='admin'&&(S.me.role=='admin'||!staffRole(i)))}
-function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(u.banned?S.me.role=='admin':canAssign(u)||kickOk(u))}
+function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(u.banned?S.me.role=='admin':canAssign(u)||kickOk(u)||voiceItems(u).length>0)}
 
 function modal(t,...n){
   const m=$('#modal');m.replaceChildren();const d=E('div');d.append(E('h3',0,t),...n);
@@ -280,13 +303,16 @@ function manage(u){
       n.push(k,b);
     }
   }
+  voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
   modal(u.name,...n);
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Manage roles (only up to your own permissions)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',private:'See private voice and text channels'};
 function roleRow(id,r){
+  const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
   nm.value=r.name;nm.placeholder='Role name';co.type='color';co.value=r.color;top.append(nm,co);d.append(top);
-  const ps=Object.entries(PL).map(([k,l])=>{const lb=E('label','cb'),c=E('input');c.type='checkbox';c.checked=r.perms.includes(k);lb.append(c,l);d.append(lb);return[k,c]});
+  const ps=Object.entries(PL).map(([k,l])=>{const lb=E('label','cb'),c=E('input');c.type='checkbox';c.checked=r.perms.includes(k);c.disabled=!ok||!mine.includes(k);lb.append(c,l);d.append(lb);return[k,c]});
+  if(!ok){nm.disabled=true;co.disabled=true;d.append(E('small',0,locked?'Permanent: every new account starts with this role. It cannot be edited or deleted.':'Read only: this role has permissions you do not have.'));return d}
   const sv=E('button','p',id?'Save':'Create role');
   sv.onclick=()=>{tx({t:'role',id,name:nm.value,color:co.value,perms:ps.filter(([,c])=>c.checked).map(([k])=>k)});close()};
   d.append(sv);
@@ -308,7 +334,7 @@ $('#file').onchange=e=>{
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
 
 /* ---------- Drag and drop (channels, categories) ---------- */
-let drag=null;
+let drag=null;const fold=new Set();
 function dg(el,o){el.draggable=true;el.ondragstart=e=>{drag=o;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x');e.stopPropagation()};el.ondragend=()=>{drag=null}}
 function dz(el,f){
   const low=e=>{const r=el.getBoundingClientRect();return e.clientY>=r.top+r.height/2};
@@ -319,15 +345,33 @@ function dz(el,f){
 
 /* ---------- Settings, mute / deafen, speaking indicator ---------- */
 const ico=(c,off)=>E('span','ico'+(off?' off':''),c);
-const vsI=k=>{const s=(S.vs||{})[k]||{};return s.d?[ico('🎤',1),ico('🎧',1)]:s.m?[ico('🎤',1)]:[]};
-function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!muted&&!deaf)}
-function setVS(){applyMic();Object.values(auds).forEach(a=>a.muted=deaf);tx({t:'vs',m:muted,d:deaf});render()}
+const vsI=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{},d=s.d||v.d,mu=d||s.m||v.m;return d?[ico('🎤',1),ico('🎧',1)]:mu?[ico('🎤',1)]:[]};
+const svm=()=>!!(S&&S.me.sv&&S.me.sv.m),svd=()=>!!(S&&S.me.sv&&S.me.sv.d);
+const hear=()=>!(deaf||svd());
+const peerMuted=k=>{const v=S&&S.sv&&S.sv[k];return !!(v&&(v.m||v.d))};   // everyone silences server-muted people, so it holds even if their own app ignores it
+function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!(muted||deaf||svm()||svd()))}
+function syncAudio(){Object.entries(auds).forEach(([k,a])=>a.muted=!hear()||peerMuted(k))}
+function setVS(){applyMic();syncAudio();tx({t:'vs',m:muted,d:deaf});render()}
+function toggleMute(){if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
+function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS()}
+let tt;function toast(t){const e=$('#toast');e.textContent=t;e.classList.remove('hide');clearTimeout(tt);tt=setTimeout(()=>e.classList.add('hide'),3500)}
+function voiceItems(u){
+  const me=S.me,it=[];
+  if(!tgtOk(u)||u.banned)return it;
+  const sv=(S.sv||{})[u.key]||{},inV=Object.values(S.voice).some(a=>a.includes(u.key));
+  if(me.perms.includes('voicemod')){
+    if(inV||sv.m)it.push([sv.m?'Remove server mute':'Server mute',()=>tx({t:'smute',key:u.key,on:!sv.m})]);
+    if(inV||sv.d)it.push([sv.d?'Remove server deafen':'Server deafen',()=>tx({t:'sdeaf',key:u.key,on:!sv.d})]);
+  }
+  if(me.perms.includes('disconnect')&&inV)it.push(['Disconnect from voice',()=>tx({t:'vkick',key:u.key}),'dng']);
+  return it;
+}
 function settings(){
   const me=S.users.find(x=>x.key==S.me.key),n=E('input');n.value=me.name;n.maxLength=20;
   const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
   const pic=E('button',0,'Change profile picture');pic.onclick=()=>{close();$('#file').click()};
   const items=[E('label',0,'Display name'),n,E('small',0,'Your login username stays "'+S.me.key+'".'),sv,pic];
-  if(S.me.role=='admin'){const r=E('button',0,'Manage roles');r.onclick=roleModal;items.push(r)}
+  if(S.me.perms.includes('roles')){const r=E('button',0,'Manage roles');r.onclick=roleModal;items.push(r)}
   modal('Settings',...items);
 }
 let actx;const an={};
@@ -370,24 +414,34 @@ function userMenu(e,u){
   if(u.key==me.key){
     it.push(['Change display name',()=>{const n=prompt('New display name',u.name);if(n)tx({t:'setname',name:n})}],
       ['Change profile picture',()=>$('#file').click()],null,
-      [muted||deaf?'Unmute':'Mute',()=>{if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}],
-      [deaf?'Undeafen':'Deafen',()=>{deaf=!deaf;setVS()}]);
+      [muted||deaf||svm()||svd()?'Unmute':'Mute',toggleMute],
+      [deaf||svd()?'Undeafen':'Deafen',toggleDeaf]);
   }else if(u.banned){
     if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})]);
   }else{
     if(canAssign(u)){it.push(null,'Role');assignable().forEach(([id,r])=>it.push([(u.role==id?'✓ ':'')+r.name,()=>tx({t:'setrole',key:u.key,role:id})]))}
     if(kickOk(u))it.push(null,['Kick',()=>tx({t:'kick',key:u.key}),'dng'],['Ban',()=>confirm('Ban '+u.name+'?')&&tx({t:'ban',key:u.key}),'dng']);
   }
+  const vi=voiceItems(u);if(vi.length)it.push(null,...vi);
   if(it.length>1)ctx(e,it);
 }
-function beep(fs){
-  if(deaf)return;
-  try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();actx.resume();const t=actx.currentTime;
-    fs.forEach((f,i)=>{const o=actx.createOscillator(),g=actx.createGain(),s=t+i*.11;
-      o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.18,s+.02);g.gain.exponentialRampToValueAtTime(.001,s+.16);
-      o.connect(g);g.connect(actx.destination);o.start(s);o.stop(s+.18)})}catch{}
+const unlock=()=>{try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state!='running')actx.resume()}catch{}};
+['click','keydown','touchstart'].forEach(ev=>addEventListener(ev,unlock,{passive:true}));
+// Optional: put your own join.mp3 and leave.mp3 in public/sounds/ and they are used instead of the built-in tones.
+const sfx={};
+['join','leave'].forEach(n=>fetch('/sounds/'+n+'.mp3',{method:'HEAD'}).then(r=>{if(r.ok&&/audio/.test(r.headers.get('content-type')||''))sfx[n]=new Audio('/sounds/'+n+'.mp3')}).catch(()=>{}));
+function note(f,at,dur,g){
+  const t=actx.currentTime+at,o=actx.createOscillator(),h=actx.createOscillator(),v=actx.createGain();
+  o.type='sine';h.type='triangle';o.frequency.value=f;h.frequency.value=f*2;
+  v.gain.setValueAtTime(.0001,t);v.gain.exponentialRampToValueAtTime(g,t+.02);v.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(v);h.connect(v);v.connect(actx.destination);o.start(t);h.start(t);o.stop(t+dur+.05);h.stop(t+dur+.05);
 }
-const sJoin=()=>beep([523,784]),sLeave=()=>beep([659,440]);
+function sfxPlay(n,notes){
+  if(deaf||svd())return;
+  if(sfx[n]){sfx[n].currentTime=0;sfx[n].volume=.7;sfx[n].play().catch(()=>{});return}
+  try{unlock();const go=()=>notes.forEach(([f,at])=>note(f,at,.22,.22));actx.state=='running'?go():actx.resume().then(go).catch(()=>{})}catch{}
+}
+const sJoin=()=>sfxPlay('join',[[587,0],[880,.1]]),sLeave=()=>sfxPlay('leave',[[784,0],[523,.1]]);
 
 /* ---------- Voice (WebRTC mesh, best for small groups) ---------- */
 function panel(){
@@ -413,7 +467,7 @@ function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).in
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pcs[k]=pc;
   pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
-  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.muted=deaf;a.play().catch(()=>{});watch(k,e.streams[0])};
+  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.muted=!hear()||peerMuted(k);a.play().catch(()=>{});watch(k,e.streams[0])};
   if(init)pc.onnegotiationneeded=async()=>{await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})};
   local.getTracks().forEach(t=>pc.addTrack(t,local));
   return pc;
