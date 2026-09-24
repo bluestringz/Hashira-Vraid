@@ -165,6 +165,9 @@ const $=s=>document.querySelector(s);
 const E=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
 let ws,S=null,cur=null,tok=localStorage.tk,local=null,muted=false,deaf=false,vc=null;
 const pcs={},auds={};
+let desired=null,joining=false,joinedAt=0,misses=0,lost=false,rc=null,rt=null;   // desired: the voice channel I want to be in, so the app can get me back after a hiccup
+try{desired=sessionStorage.vc||null}catch{}   // survives a page refresh (this tab only), so a refresh puts you back in voice
+function want(id){desired=id||null;try{if(desired)sessionStorage.vc=desired;else delete sessionStorage.vc}catch{}}
 document.documentElement.dataset.theme=localStorage.th||'dark';
 
 async function auth(mode){
@@ -174,17 +177,24 @@ async function auth(mode){
   tok=localStorage.tk=j.token;$('#err').textContent='';connect();
 }
 function connect(){
-  ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
-  ws.onopen=()=>sendVS();
-  ws.onmessage=e=>on(JSON.parse(e.data));
-  ws.onclose=e=>{
+  if(ws&&(ws.readyState===0||ws.readyState===1))return;   // never keep two sockets
+  const sock=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
+  ws=sock;
+  sock.onopen=()=>{if(sock===ws)sendVS()};
+  sock.onmessage=e=>{if(sock===ws)on(JSON.parse(e.data))};
+  sock.onclose=e=>{
+    if(sock!==ws)return;   // a late close from an old socket must not tear down the live one
     leaveVoice(true);
     if(e.code>=4000){
+      want(null);
       if(e.code!=4004)delete localStorage.tk;   // 4004 = signed in elsewhere; keep the token so another tab of this browser keeps working
       tok=null;S=null;
       $('#app').classList.add('hide');$('#login').classList.remove('hide');
       $('#err').textContent=e.code==4002?'You were kicked. You can log in again.':e.code==4003?'This account is banned.':e.code==4004?'Your account was logged in from another device or browser tab, so this session was disconnected.':'Your session ended. Please log in again.';
-    }else setTimeout(connect,2000);
+    }else{
+      if(!lost){lost=true;toast('Connection lost. Reconnecting…')}
+      clearTimeout(rc);rc=setTimeout(connect,2000);   // when it is back, the app rejoins your voice channel by itself
+    }
   };
 }
 const tx=o=>ws&&ws.readyState==1&&ws.send(JSON.stringify(o));
@@ -199,16 +209,18 @@ function on(m){
     applyMic();syncAudio();
     $('#login').classList.add('hide');$('#app').classList.remove('hide');
     const same=cur&&S.channels.find(c=>c.id==cur.id);
-    if(same)cur=same;else pick(S.channels[0],true);
+    if(same)cur=same;else pick((!cur&&desired&&S.channels.find(c=>c.id==desired))||S.channels[0],true);   // after a refresh, open the voice channel you were in
     render();syncPeers();
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
+    if(lost){lost=false;toast('Reconnected')}
+    reconcile();
   }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg)}
   else if(m.t=='chat'&&cur&&m.ch==cur.id)addMsg(m.msg);
-  else if(m.t=='peers')m.peers.forEach(k=>mk(k,true));
-  else if(m.t=='moved'){Object.keys(pcs).forEach(closePeer);vc=m.ch;toast('A moderator moved you to another voice channel');const c=S&&S.channels.find(x=>x.id==m.ch);if(c)pick(c)}
+  else if(m.t=='peers')m.peers.forEach(k=>{if(pcs[k])closePeer(k);mk(k,true)});
+  else if(m.t=='moved'){Object.keys(pcs).forEach(closePeer);vc=m.ch;want(m.ch);toast('A moderator moved you to another voice channel');const c=S&&S.channels.find(x=>x.id==m.ch);if(c)pick(c)}
   else if(m.t=='sig')onSig(m.from,m.data);
   else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
-  else if(m.t=='kicked'||m.t=='denied'){leaveVoice(true);if(m.by)toast('You were disconnected from voice by a moderator')}
+  else if(m.t=='kicked'||m.t=='denied'){want(null);leaveVoice(true);toast(m.by?'You were disconnected from voice by a moderator':'You no longer have access to that voice channel')}
   else if(m.t=='error')alert(m.msg);
   else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
   else if(m.t=='clear'&&cur&&m.ch==cur.id)$('#msgs').replaceChildren();
@@ -285,7 +297,7 @@ function render(){
   const hp=E('button');hp.title=svd()?'Deafened by a moderator':deaf?'Undeafen':'Deafen';hp.append(ico('🎧',deaf||svd()));hp.onclick=toggleDeaf;
   const th=E('button',0,'◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
   const st=E('button',0,'⚙');st.title='Settings';st.onclick=settings;
-  const lo=E('button',0,'⎋');lo.title='Log out';lo.onclick=()=>{delete localStorage.tk;location.reload()};
+  const lo=E('button',0,'⎋');lo.title='Log out';lo.onclick=()=>{want(null);delete localStorage.tk;location.reload()};
   r2.append(mic,hp,th,st,lo);f.append(r1,r2);
   // main
   const txt=cur&&cur.type=='text';
@@ -692,7 +704,9 @@ function atile(u){
 function panel(){
   const v=$('#vbox');v.replaceChildren();
   const inV=vc==cur.id,bar=E('div','bar');
-  const j=E('button','p',inV?'Leave voice':'Join voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
+  const j=E('button','p',joining?'Joining…':inV?'Leave voice':'Join voice');
+  j.onclick=()=>{if(joining||Date.now()-joinedAt<800)return;vc==cur.id?leaveVoice():joinVoice(cur.id)};   // a double click must not join and then leave
+  bar.append(j);
   if(inV){
     const cb=E('button',0,camS?'Turn off camera':'Turn on camera');cb.onclick=toggleCam;bar.append(cb);
     if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia){const sb=E('button',0,scrS?'Stop sharing':'Share screen');sb.onclick=toggleScreen;bar.append(sb)}
@@ -751,12 +765,32 @@ function stopVideo(kind){
 
 /* ---------- Voice connections (WebRTC mesh, best for small groups) ---------- */
 async function joinVoice(id){
-  try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia(micConstraints())}
-  catch(e){return micError(e)}
-  await loadIce();
-  vc=id;applyMic();watch(S.me.key,local);tx({t:'join',ch:id});sendVS();sJoin();
+  if(joining)return;
+  joining=true;if(cur&&cur.type=='voice')panel();
+  try{
+    if(vc)leaveVoice();
+    let st;try{st=await navigator.mediaDevices.getUserMedia(micConstraints())}catch(e){want(null);return micError(e)}
+    local=st;await loadIce();
+    want(id);vc=id;joinedAt=Date.now();misses=0;
+    applyMic();watch(S.me.key,local);tx({t:'join',ch:id});sendVS();sJoin();
+    clearTimeout(rt);rt=setTimeout(reconcile,1600);
+  }finally{joining=false;if(cur&&cur.type=='voice')panel()}
+}
+function reconcile(){   // keep this app and the server in agreement about who is in voice
+  clearTimeout(rt);
+  if(!desired||joining||!S)return;
+  const inSrv=(S.voice[desired]||[]).includes(S.me.key);
+  if(vc==desired&&inSrv){misses=0;return}
+  const wait=1500-(Date.now()-joinedAt);
+  if(vc==desired&&wait>0){rt=setTimeout(reconcile,wait+50);return}   // the join may still be on its way
+  if(vc==desired){   // the server dropped me but I am still connected: ask to be put back
+    if(++misses<=2){tx({t:'join',ch:desired});sendVS();rt=setTimeout(reconcile,1500);return}
+    toast('You were removed from the voice channel');want(null);leaveVoice(true);return;
+  }
+  if(!vc)joinVoice(desired);   // the connection dropped and came back: rejoin
 }
 function leaveVoice(quiet){
+  if(!quiet)want(null);
   Object.keys(pcs).forEach(closePeer);Object.keys(an).forEach(unwatch);
   ['cam','scr'].forEach(killVideo);
   if(local)local.getTracks().forEach(t=>t.stop());
