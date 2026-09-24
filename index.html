@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="fil"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hashira VRaid</title>
+<link rel="icon" href="/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--red:#e11d2e;--tx:#f3eef0;--mut:#a89aa0;--pan:rgba(16,7,11,.76);--pan2:rgba(255,255,255,.07);--bd:rgba(255,255,255,.13);--ov:rgba(6,2,5,.66);--solid:#1a0b10}
+[data-theme=light]{--tx:#1d0f13;--mut:#6b5a60;--pan:rgba(255,255,255,.82);--pan2:rgba(0,0,0,.06);--bd:rgba(0,0,0,.15);--ov:rgba(255,255,255,.7);--solid:#fff}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:15px/1.4 system-ui,sans-serif;color:var(--tx);background:linear-gradient(var(--ov),var(--ov)),url(/bg.jpg) center/cover fixed,#120608}
+h1,h2,h3,.brand{font-family:Rajdhani,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--pan2);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--red)}
+button.p{background:var(--red);border-color:var(--red);color:#fff}
+input,select{background:var(--pan2);border:1px solid var(--bd);border-radius:6px;padding:8px 10px;width:100%}
+select option{color:#000}
+input[type=checkbox]{width:auto}
+input[type=color]{width:44px;height:36px;padding:2px}
+:focus-visible{outline:2px solid var(--red);outline-offset:1px}
+.hide{display:none!important}
+#login{height:100%;display:grid;place-items:center;padding:16px}
+.card{background:var(--pan);border:1px solid var(--bd);backdrop-filter:blur(10px);border-radius:10px;padding:24px;width:min(360px,100%);display:grid;gap:10px;text-align:center}
+.card img{width:170px;margin:0 auto}
+.card h1{margin:0;font-size:34px;letter-spacing:.04em}
+.card .row{display:flex;gap:8px}.card .row button{flex:1}
+#err{color:var(--red);min-height:1.2em;font-size:13px}
+#app{height:100%;display:grid;grid-template-columns:250px 1fr 230px}
+aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-direction:column;min-height:0;min-width:0}
+#side{border-right:1px solid var(--bd)}#mem{border-left:1px solid var(--bd)}
+.hd{padding:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--bd)}
+.hd img{width:38px}.brand{font-size:22px;font-weight:700;letter-spacing:.03em}
+.list{flex:1;overflow:auto;padding:8px}
+.sec{display:flex;justify-content:space-between;align-items:center;color:var(--mut);font-size:13px;margin:10px 4px 4px}
+.ch{display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer}
+.ch:hover,.ch.on{background:var(--pan2)}.ch.on{border-left:3px solid var(--red)}
+.ch span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vm{margin-left:22px;font-size:13px;color:var(--mut);display:flex;gap:6px;align-items:center;padding:2px}
+.av{width:30px;height:30px;border-radius:50%;background:var(--red);color:#fff;display:grid;place-items:center;font-weight:700;overflow:hidden;flex:none;position:relative;font-size:13px}
+.av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.vm .av{width:20px;height:20px;font-size:10px}.av.big{width:64px;height:64px;font-size:24px}
+.me{padding:10px;border-top:1px solid var(--bd);display:flex;gap:6px;align-items:center}
+.me b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#top{padding:12px 16px;border-bottom:1px solid var(--bd)}
+#top h2{margin:0;font-size:22px}
+#msgs{flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.m{display:flex;gap:10px}.m p{margin:2px 0 0;word-break:break-word}.m small{color:var(--mut)}
+#send{display:flex;gap:8px;padding:12px}
+#vbox{flex:1;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-content:flex-start}
+.bar{width:100%;display:flex;gap:8px}
+.vc{display:grid;justify-items:center;gap:4px;width:80px;text-align:center;font-size:13px}
+.mrow{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px}
+.mrow.mg{cursor:pointer}.mrow:hover{background:var(--pan2)}
+.mrow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow.off{opacity:.5}
+.tag{font-size:11px;padding:1px 7px;border-radius:9px;color:#fff}
+.x{padding:1px 7px;font-size:13px}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:12px;z-index:9}
+#modal>div{background:var(--solid);border:1px solid var(--bd);border-radius:10px;padding:18px;width:min(440px,100%);max-height:90vh;overflow:auto;display:grid;gap:8px}
+#modal h3{margin:0;font-size:22px}
+.rr{display:grid;gap:6px;padding:10px;border:1px solid var(--bd);border-radius:8px}
+.rr .top{display:flex;gap:8px}.cb{display:flex;gap:6px;align-items:center;font-size:14px}
+@media(max-width:800px){#app{grid-template-columns:1fr;grid-template-rows:38vh 1fr}#mem{display:none}#side{border-right:0}}
+</style></head><body>
+
+<div id="login"><form class="card" onsubmit="event.preventDefault();auth('login')">
+  <img src="/logo.png" alt="Hashira Esports">
+  <h1>Hashira VRaid</h1>
+  <input id="u" placeholder="Username" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <div id="err"></div>
+  <div class="row"><button class="p" type="submit">Login</button><button type="button" onclick="auth('register')">Gumawa ng account</button></div>
+</form></div>
+
+<div id="app" class="hide">
+  <aside id="side">
+    <div class="hd"><img src="/logo.png" alt=""><span class="brand">Hashira VRaid</span></div>
+    <div class="list" id="chl"></div>
+    <div class="me" id="me"></div>
+  </aside>
+  <main>
+    <div id="top"><h2 id="title"></h2></div>
+    <div id="msgs"></div>
+    <form id="send"><input id="txt" placeholder="Mag-type ng message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
+    <div id="vbox" class="hide"></div>
+  </main>
+  <aside id="mem"><div class="hd"><b class="brand">Members</b></div><div class="list" id="mlist"></div></aside>
+</div>
+<div id="modal" class="hide"></div>
+<input type="file" id="file" accept="image/*" class="hide">
+
+<script>
+const $=s=>document.querySelector(s);
+const E=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+let ws,S=null,cur=null,tok=localStorage.tk,local=null,muted=false,vc=null;
+const pcs={},auds={};
+document.documentElement.dataset.theme=localStorage.th||'dark';
+
+async function auth(mode){
+  const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,username:$('#u').value,password:$('#pw').value})});
+  const j=await r.json();
+  if(!r.ok)return $('#err').textContent=j.error;
+  tok=localStorage.tk=j.token;$('#err').textContent='';connect();
+}
+function connect(){
+  ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
+  ws.onmessage=e=>on(JSON.parse(e.data));
+  ws.onclose=e=>{
+    leaveVoice(true);
+    if(e.code>=4000){
+      delete localStorage.tk;tok=null;S=null;
+      $('#app').classList.add('hide');$('#login').classList.remove('hide');
+      $('#err').textContent=e.code==4002?'Na-kick ka. Pwede kang mag-login ulit.':e.code==4003?'Naka-ban ang account na ito.':'';
+    }else setTimeout(connect,2000);
+  };
+}
+const tx=o=>ws&&ws.readyState==1&&ws.send(JSON.stringify(o));
+if(tok)connect();
+
+function on(m){
+  if(m.t=='state'){
+    S=m;$('#login').classList.add('hide');$('#app').classList.remove('hide');
+    const same=cur&&S.channels.find(c=>c.id==cur.id);
+    if(same)cur=same;else pick(S.channels[0],true);
+    render();syncPeers();
+  }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg)}
+  else if(m.t=='chat'&&cur&&m.ch==cur.id)addMsg(m.msg);
+  else if(m.t=='peers')m.peers.forEach(k=>mk(k,true));
+  else if(m.t=='sig')onSig(m.from,m.data);
+  else if(m.t=='kicked'||m.t=='denied')leaveVoice(true);
+}
+
+function avEl(k,name,cls){
+  const a=E('div','av '+(cls||''),(name||'?')[0].toUpperCase());
+  const u=S&&S.users.find(x=>x.key==k);
+  if(u&&u.av){const i=new Image();i.src='/av/'+k+'?v='+u.av;i.onerror=()=>i.remove();a.append(i)}
+  return a;
+}
+function tag(id){const r=S.roles[id]||{name:id,color:'#777'};const t=E('span','tag',r.name);t.style.background=r.color;return t}
+function addMsg(m){
+  const d=E('div','m');d.append(avEl(m.key,m.name));
+  const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
+  h.append(E('b',0,m.name+' '));if(u)h.append(tag(u.role),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+  b.append(h,E('p',0,m.text));d.append(b);
+  const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
+}
+function pick(c,quiet){
+  cur=c;if(!c)return;
+  if(c.type=='text')tx({t:'open',ch:c.id});
+  if(!quiet)render();
+}
+
+function render(){
+  const me=S.me,P=p=>me.perms.includes(p),L=$('#chl');L.replaceChildren();
+  [['voice','Voice channels'],['text','Text channels']].forEach(([ty,lab])=>{
+    const s=E('div','sec');s.append(E('span',0,lab));
+    if(P('channels')){const b=E('button','x','+');b.title='Gumawa ng channel';b.onclick=()=>newCh(ty);s.append(b)}
+    L.append(s);
+    S.channels.filter(c=>c.type==ty).forEach(c=>{
+      const d=E('div','ch'+(cur&&cur.id==c.id?' on':''));
+      d.append(E('span',0,(ty=='voice'?'🔊 ':'# ')+c.name+(c.open?'':' 🔒')));
+      if(P('channels')){const b=E('button','x','✎');b.title='Rename';b.onclick=e=>{e.stopPropagation();const n=prompt('Bagong pangalan ng channel',c.name);if(n)tx({t:'renamech',id:c.id,name:n})};d.append(b)}
+      if(me.role=='admin'&&c.id!='open'){const b=E('button','x','🗑');b.title='Delete';b.onclick=e=>{e.stopPropagation();confirm('I-delete ang "'+c.name+'"?')&&tx({t:'delch',id:c.id})};d.append(b)}
+      d.onclick=()=>pick(c);L.append(d);
+      (S.voice[c.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const v=E('div','vm');v.append(avEl(k,u.name),E('span',0,u.name));L.append(v)});
+    });
+  });
+  // my footer
+  const f=$('#me'),mu=S.users.find(x=>x.key==me.key);f.replaceChildren();
+  const a=avEl(me.key,mu.name);a.style.cursor='pointer';a.title='Palitan ang profile picture';a.onclick=()=>$('#file').click();
+  const nm=E('b',0,mu.name);
+  const th=E('button','x','◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
+  f.append(a,nm,tag(me.role),th);
+  if(me.role=='admin'){const g=E('button','x','⚙');g.title='Roles settings';g.onclick=roleModal;f.append(g)}
+  const lo=E('button','x','⎋');lo.title='Logout';lo.onclick=()=>{delete localStorage.tk;location.reload()};f.append(lo);
+  // main
+  const txt=cur&&cur.type=='text';
+  $('#title').textContent=cur?(txt?'# ':'🔊 ')+cur.name:'';
+  $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!cur);
+  if(cur&&!txt)panel();
+  // members
+  const M=$('#mlist');M.replaceChildren();
+  S.users.slice().sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).forEach(u=>{
+    const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
+    r.append(avEl(u.key,u.name),E('span',0,u.name+(u.banned?' (ban)':'')),tag(u.role));
+    if(mg){r.title='I-manage';r.onclick=()=>manage(u)}
+    M.append(r);
+  });
+}
+function kickOk(u){
+  const me=S.me;
+  return me.perms.includes('kick')&&u.role!='admin'&&u.key!=me.key&&(me.role=='admin'||!(S.roles[u.role]||{perms:[]}).perms.includes('kick'));
+}
+function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||kickOk(u))}
+
+function modal(t,...n){
+  const m=$('#modal');m.replaceChildren();const d=E('div');d.append(E('h3',0,t),...n);
+  const c=E('button',0,'Isara');c.onclick=()=>m.classList.add('hide');d.append(c);m.append(d);m.classList.remove('hide');
+}
+$('#modal').onclick=e=>{if(e.target.id=='modal')e.target.classList.add('hide')};
+const close=()=>$('#modal').classList.add('hide');
+
+function newCh(type){
+  const name=prompt('Pangalan ng '+(type=='voice'?'voice':'text')+' channel');if(!name)return;
+  tx({t:'addch',name,type,open:confirm('Open sa lahat ng may account?\nOK = Open   |   Cancel = Private (Verified lang)')});
+}
+function manage(u){
+  const n=[];
+  if(u.banned){if(S.me.role=='admin'){const b=E('button','p','Unban');b.onclick=()=>{tx({t:'unban',key:u.key});close()};n.push(b)}}
+  else{
+    if(S.me.role=='admin'){
+      const s=E('select');
+      Object.entries(S.roles).filter(([i])=>i!='admin').forEach(([i,r])=>{const o=E('option',0,r.name);o.value=i;s.append(o)});
+      s.value=u.role;s.onchange=()=>tx({t:'setrole',key:u.key,role:s.value});
+      n.push(E('label',0,'Role'),s);
+    }
+    if(kickOk(u)){
+      const k=E('button',0,'Kick'),b=E('button','p','Ban');
+      k.onclick=()=>{tx({t:'kick',key:u.key});close()};
+      b.onclick=()=>{if(confirm('I-ban si '+u.name+'?')){tx({t:'ban',key:u.key});close()}};
+      n.push(k,b);
+    }
+  }
+  modal(u.name,...n);
+}
+const PL={channels:'Gumawa at mag-rename ng channel',kick:'Kick at Ban ng user',private:'Makita ang private voice/text channels'};
+function roleRow(id,r){
+  const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
+  nm.value=r.name;nm.placeholder='Pangalan ng role';co.type='color';co.value=r.color;top.append(nm,co);d.append(top);
+  const ps=Object.entries(PL).map(([k,l])=>{const lb=E('label','cb'),c=E('input');c.type='checkbox';c.checked=r.perms.includes(k);lb.append(c,l);d.append(lb);return[k,c]});
+  const sv=E('button','p',id?'Save':'Gumawa ng role');
+  sv.onclick=()=>{tx({t:'role',id,name:nm.value,color:co.value,perms:ps.filter(([,c])=>c.checked).map(([k])=>k)});close()};
+  d.append(sv);
+  if(id&&id!='default'){const x=E('button',0,'Delete role');x.onclick=()=>confirm('I-delete ang role na ito? Babalik sa Default ang mga may hawak nito.')&&(tx({t:'delrole',id}),close());d.append(x)}
+  return d;
+}
+function roleModal(){
+  modal('Roles',...Object.entries(S.roles).filter(([i])=>i!='admin').map(([i,r])=>roleRow(i,r)),E('h3',0,'Bagong role'),roleRow('',{name:'',color:'#888888',perms:[]}));
+}
+
+$('#file').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const i=new Image();
+  i.onload=()=>{const c=document.createElement('canvas');c.width=c.height=128;const s=Math.min(i.width,i.height);
+    c.getContext('2d').drawImage(i,(i.width-s)/2,(i.height-s)/2,s,s,0,0,128,128);
+    tx({t:'avatar',data:c.toDataURL('image/jpeg',.8)})};
+  i.src=URL.createObjectURL(f);e.target.value='';
+};
+$('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
+
+/* ---------- Voice (WebRTC mesh, best for small groups) ---------- */
+function panel(){
+  const v=$('#vbox');v.replaceChildren();
+  const inV=vc==cur.id,bar=E('div','bar');
+  const j=E('button','p',inV?'Umalis sa voice':'Sumali sa voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
+  if(inV){const mb=E('button',0,muted?'Unmute':'Mute');mb.onclick=()=>{muted=!muted;local.getAudioTracks().forEach(t=>t.enabled=!muted);panel()};bar.append(mb)}
+  v.append(bar);
+  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.append(avEl(k,u.name,'big'),E('div',0,u.name));v.append(c)});
+}
+async function joinVoice(id){
+  try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
+  catch{return alert('Kailangan ng microphone permission at HTTPS.')}
+  vc=id;muted=false;tx({t:'join',ch:id});
+}
+function leaveVoice(quiet){
+  Object.keys(pcs).forEach(closePeer);
+  if(local)local.getTracks().forEach(t=>t.stop());
+  local=null;if(vc&&!quiet)tx({t:'leave'});
+  vc=null;if(S&&cur)render();
+}
+function closePeer(k){pcs[k]&&pcs[k].close();delete pcs[k];if(auds[k]){auds[k].srcObject=null;delete auds[k]}}
+function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).includes(k))closePeer(k)})}
+function mk(k,init){
+  const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pcs[k]=pc;
+  pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
+  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.play().catch(()=>{})};
+  if(init)pc.onnegotiationneeded=async()=>{await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})};
+  local.getTracks().forEach(t=>pc.addTrack(t,local));
+  return pc;
+}
+async function onSig(k,d){
+  if(!local)return;
+  const pc=pcs[k]||mk(k,false);
+  if(d.d){
+    await pc.setRemoteDescription(d.d);
+    if(d.d.type=='offer'){await pc.setLocalDescription(await pc.createAnswer());tx({t:'sig',to:k,data:{d:pc.localDescription}})}
+  }else if(d.c)try{await pc.addIceCandidate(d.c)}catch{}
+}
+</script></body></html>
