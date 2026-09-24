@@ -36,6 +36,20 @@ async function load() {
     await pool.query('CREATE TABLE IF NOT EXISTS store (id INT PRIMARY KEY, data JSONB NOT NULL)');
     const r = await pool.query('SELECT data FROM store WHERE id = 1');
     if (r.rows[0]) saved = r.rows[0].data;
+    // Moving to a new database (e.g. a new Render region): set IMPORT_DATABASE_URL to the OLD database's External URL.
+    // On the first start with an empty new database, everything is copied over once. Remove the variable afterwards.
+    if (!saved && process.env.IMPORT_DATABASE_URL) {
+      const old = new Pool({ connectionString: process.env.IMPORT_DATABASE_URL, ssl: process.env.DATABASE_SSL === 'off' ? false : { rejectUnauthorized: false } });
+      try {
+        const o = await old.query('SELECT data FROM store WHERE id = 1');
+        if (o.rows[0]) {
+          saved = o.rows[0].data;
+          await pool.query('INSERT INTO store (id, data) VALUES (1, $1::jsonb) ON CONFLICT (id) DO NOTHING', [JSON.stringify(saved)]);
+          console.log('[import] copied all data from the old database (' + Object.keys(saved.users || {}).length + ' accounts). You can now remove IMPORT_DATABASE_URL.');
+        } else console.log('[import] the old database has no data');
+      } catch (e) { console.error('[import] could not read the old database:', e.message); throw e; }   // stop, so an empty app never starts by mistake
+      finally { old.end().catch(() => {}); }
+    }
   } else {
     try { saved = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch {}
   }
