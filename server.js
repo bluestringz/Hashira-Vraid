@@ -384,6 +384,7 @@ function handle(w, m) {
       if (!perms.every(p => mine.includes(p))) return send(w, { t: 'error', msg: 'You can only give permissions you have yourself' });
       const old = m.id && Object.hasOwn(db.roles, m.id) ? db.roles[m.id] : null;
       if (old && !old.perms.every(p => mine.includes(p))) return send(w, { t: 'error', msg: 'You cannot edit a role that has permissions you do not have' });
+      if (!old && !adm) return send(w, { t: 'error', msg: 'Only the admin can create new roles' });
       const id = old ? m.id : crypto.randomBytes(3).toString('hex');
       db.roles[id] = { name, color: /^#[0-9a-f]{6}$/i.test(m.color) ? m.color : '#888888', perms };
       done(); break;
