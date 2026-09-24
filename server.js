@@ -269,13 +269,26 @@ wss.on('connection', (w, req) => {
     if (db.banned[k]) return w.close(4003);
     dropSockets(k);   // newest connection wins, so the same account can't be online twice
     w.key = k; w.tok = tok; w.voice = null; push();
-    w.on('message', raw => {
+    w.on('message', (raw, isBin) => {
       w.isAlive = true;
+      if (isBin) return relayAudio(w, raw);
       let m; try { m = JSON.parse(raw); } catch { return; }
       try { handle(w, m); } catch (e) { console.error('[msg]', w.key, m && m.t, 'failed:', e); }
     });
   } catch (e) { console.error('[ws] connection failed:', e); try { w.close(1011); } catch {} }
 });
+
+// Backup audio: when two people cannot get a direct call (and no TURN relay helps), their voice goes through this
+// server instead. Frames are small compressed chunks; they are only passed to people in the same voice channel
+// who were asked for with 'rset'. Each forwarded frame starts with [key length][sender key].
+function relayAudio(w, raw) {
+  if (!w.key || !w.voice || !w.rset || !w.rset.size || raw.length > 4000) return;
+  const now = Date.now();
+  if (now - (w.rwin || 0) > 1000) { w.rwin = now; w.rbytes = 0; }
+  if ((w.rbytes += raw.length) > 48000) return;   // about 3x a normal voice stream per second: ignore anything above
+  const kb = Buffer.from(w.key), out = Buffer.concat([Buffer.from([kb.length]), kb, raw]);
+  live().forEach(x => { if (x !== w && w.rset.has(x.key) && x.voice === w.voice && x.bufferedAmount < 256e3) x.send(out, { binary: true }); });
+}
 
 function handle(w, m) {
   const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p);
@@ -299,6 +312,7 @@ function handle(w, m) {
       push(); break;
     }
     case 'ping': break;   // client keep-alive
+    case 'rset': w.rset = new Set((Array.isArray(m.to) ? m.to : []).slice(0, 30).map(String)); break;   // who gets my backup audio
     case 'leave': setVoice(w, null, 'left by request'); push(); break;
     case 'sig': { const p = live().find(x => x.key === m.to && x.voice && x.voice === w.voice); p && send(p, { t: 'sig', from: k, data: m.data }); break; }
     case 'vs':
