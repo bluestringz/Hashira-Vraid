@@ -393,7 +393,7 @@ function manage(u){
   voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
   modal(u.name,...n);managing={k:u.key,sig:JSON.stringify([u.roles,u.banned])};
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Manage roles (only up to your own permissions)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',private:'See private voice and text channels'};
 function roleRow(id,r){
   const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
@@ -407,7 +407,7 @@ function roleRow(id,r){
   return d;
 }
 function roleModal(){
-  modal('Roles',...Object.entries(S.roles).filter(([i])=>i!='admin').map(([i,r])=>roleRow(i,r)),E('h3',0,'New role'),roleRow('',{name:'',color:'#888888',perms:[]}));
+  modal('Roles',...Object.entries(S.roles).filter(([i])=>i!='admin').map(([i,r])=>roleRow(i,r)),...(S.me.role=='admin'?[E('h3',0,'New role'),roleRow('',{name:'',color:'#888888',perms:[]})]:[]));   // only the admin creates roles
 }
 
 $('#file').onchange=e=>{
