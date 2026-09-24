@@ -59,7 +59,9 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #send{display:flex;gap:8px;padding:12px}
 #vbox{flex:1;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-content:flex-start}
 .bar{width:100%;display:flex;gap:8px}
-.vc{display:grid;justify-items:center;gap:4px;width:80px;text-align:center;font-size:13px}
+.vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
+.vc button{font-size:11px;padding:2px 6px}
+.lmrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .mrow{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px}
 .mrow.mg{cursor:pointer}.mrow:hover{background:var(--pan2)}
 .mrow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -345,12 +347,17 @@ function dz(el,f){
 
 /* ---------- Settings, mute / deafen, speaking indicator ---------- */
 const ico=(c,off)=>E('span','ico'+(off?' off':''),c);
-const vsI=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{},d=s.d||v.d,mu=d||s.m||v.m;return d?[ico('🎤',1),ico('🎧',1)]:mu?[ico('🎤',1)]:[]};
+const vsI=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{},d=s.d||v.d,mu=d||s.m||v.m,a=d?[ico('🎤',1),ico('🎧',1)]:mu?[ico('🎤',1)]:[];if(lmute.has(k)){const l=ico('🔊',1);l.title='Muted for you';a.push(l)}return a};
 const svm=()=>!!(S&&S.me.sv&&S.me.sv.m),svd=()=>!!(S&&S.me.sv&&S.me.sv.d);
+// "Mute for me": only this browser stops hearing that person; everyone else still hears them. Saved in this browser.
+let lmute=new Set();try{lmute=new Set(JSON.parse(localStorage.lm||'[]'))}catch{}
+const saveLM=()=>{try{localStorage.lm=JSON.stringify([...lmute])}catch{}};
+function toggleLM(k){lmute.has(k)?lmute.delete(k):lmute.add(k);saveLM();syncAudio();render()}
 const hear=()=>!(deaf||svd());
+const audioMuted=k=>!hear()||peerMuted(k)||lmute.has(k);
 const peerMuted=k=>{const v=S&&S.sv&&S.sv[k];return !!(v&&(v.m||v.d))};   // everyone silences server-muted people, so it holds even if their own app ignores it
 function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!(muted||deaf||svm()||svd()))}
-function syncAudio(){Object.entries(auds).forEach(([k,a])=>a.muted=!hear()||peerMuted(k))}
+function syncAudio(){Object.entries(auds).forEach(([k,a])=>a.muted=audioMuted(k))}
 function setVS(){applyMic();syncAudio();tx({t:'vs',m:muted,d:deaf});render()}
 function toggleMute(){if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
 function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS()}
@@ -371,6 +378,9 @@ function settings(){
   const sv=E('button','p','Save name');sv.onclick=()=>{tx({t:'setname',name:n.value});close()};
   const pic=E('button',0,'Change profile picture');pic.onclick=()=>{close();$('#file').click()};
   const items=[E('label',0,'Display name'),n,E('small',0,'Your login username stays "'+S.me.key+'".'),sv,pic];
+  items.push(E('label',0,'Muted for me (only you stop hearing them)'));
+  if(!lmute.size)items.push(E('small',0,'Nobody. Right-click a person, or use the button under them in the voice panel.'));
+  [...lmute].forEach(k=>{const u=S.users.find(x=>x.key==k),row=E('div','lmrow'),b=E('button',0,'Unmute');row.append(E('span',0,u?u.name:k),b);b.onclick=()=>{toggleLM(k);settings()};items.push(row)});
   if(S.me.perms.includes('roles')){const r=E('button',0,'Manage roles');r.onclick=roleModal;items.push(r)}
   modal('Settings',...items);
 }
@@ -419,6 +429,7 @@ function userMenu(e,u){
   }else if(u.banned){
     if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})]);
   }else{
+    it.push([lmute.has(u.key)?'Unmute for me':'Mute for me',()=>toggleLM(u.key)]);
     if(canAssign(u)){it.push(null,'Role');assignable().forEach(([id,r])=>it.push([(u.role==id?'✓ ':'')+r.name,()=>tx({t:'setrole',key:u.key,role:id})]))}
     if(kickOk(u))it.push(null,['Kick',()=>tx({t:'kick',key:u.key}),'dng'],['Ban',()=>confirm('Ban '+u.name+'?')&&tx({t:'ban',key:u.key}),'dng']);
   }
@@ -449,7 +460,9 @@ function panel(){
   const inV=vc==cur.id,bar=E('div','bar');
   const j=E('button','p',inV?'Leave voice':'Join voice');j.onclick=()=>inV?leaveVoice():joinVoice(cur.id);bar.append(j);
   v.append(bar);
-  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}v.append(c)});
+  (S.voice[cur.id]||[]).forEach(k=>{const u=S.users.find(x=>x.key==k);if(!u)return;const c=E('div','vc');c.oncontextmenu=e=>userMenu(e,u);c.append(avEl(k,u.name,'big'),E('div',0,u.name));const q=vsI(k);if(q.length){const ic=E('div');ic.append(...q);c.append(ic)}
+    if(k!=S.me.key){const b=E('button',0,lmute.has(k)?'Unmute for me':'Mute for me');b.onclick=()=>toggleLM(k);c.append(b)}
+    v.append(c)});
 }
 async function joinVoice(id){
   try{if(vc)leaveVoice();local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
@@ -467,7 +480,7 @@ function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).in
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pcs[k]=pc;
   pc.onicecandidate=e=>e.candidate&&tx({t:'sig',to:k,data:{c:e.candidate}});
-  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.muted=!hear()||peerMuted(k);a.play().catch(()=>{});watch(k,e.streams[0])};
+  pc.ontrack=e=>{const a=auds[k]||(auds[k]=new Audio());a.srcObject=e.streams[0];a.muted=audioMuted(k);a.play().catch(()=>{});watch(k,e.streams[0])};
   if(init)pc.onnegotiationneeded=async()=>{await pc.setLocalDescription(await pc.createOffer());tx({t:'sig',to:k,data:{d:pc.localDescription}})};
   local.getTracks().forEach(t=>pc.addTrack(t,local));
   return pc;
