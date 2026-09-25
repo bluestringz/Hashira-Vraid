@@ -287,7 +287,7 @@ function push() {
   live().forEach(w => {
     try {
       send(w, {
-        t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
+        t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {}, notifs: db.users[w.key].notifs || [] },
         roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
@@ -392,6 +392,26 @@ function migrateBracket() {   // one time: the old fixed bracket becomes an edit
 
 const REACTS = '👍 ❤️ 😂 🤣 😮 😢 😡 🔥 💯 👏 🙏 🎉 ⚔️ 🛡️ 🏹 🪄 💀 🩸 ⚡ 🐉 🥷 👑 🏆 🎯 ✅ ❌ 👀 🫡'.split(' ');   // emoji allowed for reactions (same list as the picker in the page)
 
+// @Name in a message -> the people it names (current display names, longest first so "GB Pilot 1" beats "GB").
+// Only people who can see the channel are notified, and never the sender.
+function mentionsIn(text, from, c) {
+  const low = text.toLowerCase(), out = [];
+  if (!low.includes('@')) return out;
+  const people = Object.entries(db.users).filter(([key]) => key !== from && !db.banned[key]).sort((a, b) => b[1].name.length - a[1].name.length);
+  let rest = low;
+  for (const [key, x] of people) {
+    const tag = '@' + x.name.toLowerCase();
+    let i = rest.indexOf(tag), hit = false;
+    while (i >= 0) {
+      const after = rest[i + tag.length] || ' ';
+      if (!/[a-z0-9_]/i.test(after)) { hit = true; rest = rest.slice(0, i) + ' '.repeat(tag.length) + rest.slice(i + tag.length); }   // blank it so shorter names don't match inside
+      i = rest.indexOf(tag, i + 1);
+    }
+    if (hit && can(key, c)) out.push(key);
+  }
+  return out.slice(0, 20);
+}
+
 function handle(w, m) {
   const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p), canBk = adm || has('bracket');
   const okTarget = t => t && t !== k && U(t) && !isAdm(t) && (adm || !P(t).some(p => STAFF.includes(p)));
@@ -403,7 +423,15 @@ function handle(w, m) {
       const c = chan(m.ch), text = String(m.text || '').trim().slice(0, 500);
       if (!can(k, c) || !text) break;
       const msg = { id: crypto.randomBytes(4).toString('hex'), key: k, name: u.name, text, ts: Date.now() };
-      db.msgs[c.id] = (db.msgs[c.id] || []).concat(msg).slice(-100); save();
+      const men = mentionsIn(text, k, c);
+      if (men.length) msg.men = men;
+      db.msgs[c.id] = (db.msgs[c.id] || []).concat(msg).slice(-100);
+      men.forEach(t => {   // @mention: a notification for that person (kept until they read it, even if offline)
+        const n = { id: crypto.randomBytes(4).toString('hex'), ch: c.id, chName: c.name, msg: msg.id, from: k, fromName: u.name, text: text.slice(0, 140), ts: msg.ts, read: false };
+        const tu = U(t); tu.notifs = [n, ...(tu.notifs || [])].slice(0, 50);
+        live().filter(x => x.key === t).forEach(x => send(x, { t: 'notif', n }));
+      });
+      save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'chat', ch: c.id, msg }));
       break;
     }
@@ -415,6 +443,11 @@ function handle(w, m) {
       push(); break;
     }
     case 'ping': break;   // client keep-alive
+    case 'notifread': {   // mark my notifications read (one, or all)
+      (u.notifs || []).forEach(n => { if (m.all || n.id === m.id) n.read = true; });
+      if (m.clear) u.notifs = [];
+      save(); send(w, { t: 'notifs', list: u.notifs || [] }); break;
+    }
     case 'rset': w.rset = new Set((Array.isArray(m.to) ? m.to : []).slice(0, 30).map(String)); break;   // who gets my backup audio
     case 'leave': setVoice(w, null, 'left by request'); push(); break;
     case 'sig': { const p = live().find(x => x.key === m.to && x.voice && x.voice === w.voice); p && send(p, { t: 'sig', from: k, data: m.data }); break; }

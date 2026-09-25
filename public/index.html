@@ -77,6 +77,16 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .m{display:flex;gap:10px}.m p{margin:2px 0 0;word-break:break-word}.m small{color:var(--mut)}
 .m .del,.m .rbtn{opacity:0}.m:hover .rbtn{opacity:1}
 .rbtn{font-size:12px;padding:0 5px;line-height:18px}
+.ment{color:#8ab4ff;background:rgba(88,101,242,.18);border-radius:4px;padding:0 2px;font-weight:600}.ment.ment-me{color:#ffd166;background:rgba(255,209,102,.18)}
+.m.mentioned{background:rgba(255,209,102,.08);border-left:3px solid #ffd166;padding-left:6px;border-radius:4px}
+.m.flash{animation:mflash 2s}@keyframes mflash{0%,40%{background:rgba(255,209,102,.35)}}
+.bell{position:relative}.bell.has::after{content:attr(data-n);position:absolute;top:-5px;right:-3px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+#npanel{position:fixed;left:10px;bottom:72px;z-index:60;width:320px;max-width:calc(100vw - 20px);max-height:60vh;overflow:auto;background:#140a0e;border:1px solid var(--bd);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:8px}
+#npanel .nh{display:flex;gap:6px;align-items:center;margin-bottom:6px}#npanel .nh b{flex:1}#npanel .nh button{font-size:12px;padding:3px 8px}
+#npanel .ni{padding:8px;border-radius:8px;cursor:pointer;border-left:3px solid transparent}#npanel .ni:hover{background:var(--pan2)}#npanel .ni.new{border-left-color:#ffd166;background:rgba(255,209,102,.06)}
+#npanel .ni p{margin:3px 0;color:var(--tx);word-break:break-word}#npanel .ni small,#npanel .nempty{color:var(--mut)}
+#send{position:relative}#mbox{position:absolute;left:10px;bottom:calc(100% + 4px);width:260px;background:#140a0e;border:1px solid var(--bd);border-radius:10px;padding:4px;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+#mbox .mo{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer}#mbox .mo.on,#mbox .mo:hover{background:var(--pan2)}#mbox .mo .av{width:22px;height:22px;font-size:11px}
 .rx{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.rx:empty{display:none}
 .rchip{font-size:13px;padding:1px 7px;border-radius:10px;background:var(--pan2);border:1px solid var(--bd);line-height:20px}
 .rchip.mine{border-color:var(--btn,var(--red));background:rgba(225,29,46,.18)}
@@ -259,11 +269,12 @@ function on(m){
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
     showUnread();
+    notifs=S.me.notifs||[];
     render();syncPeers();repaintNames();applyTheme(m.theme);
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
     reconcile();
-  }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg)}
+  }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg);jumpTo()}
   else if(m.t=='chat'){
     const here=cur&&m.ch==cur.id;
     if(here)addMsg(m.msg);
@@ -278,6 +289,8 @@ function on(m){
   else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
   else if(m.t=='kicked'||m.t=='denied'){want(null);leaveVoice(true);toast(m.by?'You were disconnected from voice by a moderator':'You no longer have access to that voice channel')}
   else if(m.t=='error')alert(m.msg);
+  else if(m.t=='notif'){notifs=[m.n,...notifs].slice(0,50);drawBell();sMention();toast('🔔 '+m.n.fromName+' mentioned you in #'+m.n.chName);deskNotify(m.n)}
+  else if(m.t=='notifs'){notifs=m.list;drawBell();if($('#npanel'))notifPanel(true)}
   else if(m.t=='react'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"] .rx');e&&drawRx(e,m.id,m.re)}
   else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
   else if(m.t=='clear'){delete unread[m.ch];showUnread();if(cur&&m.ch==cur.id)$('#msgs').replaceChildren();else render()}
@@ -322,6 +335,62 @@ function emojiPop(anchor,pick){
   p.style.top=(r.top-ph-6>8?r.top-ph-6:Math.min(innerHeight-ph-8,r.bottom+6))+'px';
   setTimeout(()=>addEventListener('click',function off(ev){if(!p.contains(ev.target)){p.remove();if(emoP===p)emoP=null;removeEventListener('click',off)}}),0);
 }
+/* ---------- @mentions ---------- */
+let notifs=[],jumpId=null;
+function msgText(t){   // show @Name in the mention colour (plain text otherwise, never HTML)
+  const p=E('p');const names=S.users.map(u=>u.name).sort((a,b)=>b.length-a.length);
+  const low=t.toLowerCase();let i=0,last=0;
+  while((i=low.indexOf('@',i))>=0){
+    const n=names.find(n=>low.startsWith('@'+n.toLowerCase(),i)&&!/[a-z0-9_]/i.test(low[i+n.length+1]||' '));
+    if(n){p.append(t.slice(last,i));const s=E('span','ment'+(n==(S.users.find(u=>u.key==S.me.key)||{}).name?' ment-me':''),t.slice(i,i+n.length+1));p.append(s);i+=n.length+1;last=i}else i++;
+  }
+  p.append(t.slice(last));return p;
+}
+function drawBell(){const b=$('#bell');if(!b)return;const n=notifs.filter(x=>!x.read).length;b.dataset.n=n>99?'99+':n||'';b.classList.toggle('has',n>0);showUnread()}
+function notifPanel(refresh){
+  let p=$('#npanel');
+  if(p&&!refresh){p.remove();return}
+  if(!p){p=E('div');p.id='npanel';document.body.append(p);setTimeout(()=>addEventListener('click',function off(e){if(!p.contains(e.target)&&e.target.id!='bell'){p.remove();removeEventListener('click',off)}}),0)}
+  p.replaceChildren();
+  const hd=E('div','nh');hd.append(E('b',0,'Mentions'));
+  const ra=E('button',0,'Mark all read');ra.onclick=()=>tx({t:'notifread',all:1});
+  const cl=E('button',0,'Clear');cl.onclick=()=>tx({t:'notifread',all:1,clear:1});hd.append(ra,cl);p.append(hd);
+  if('Notification'in window&&Notification.permission=='default'){const en=E('button','p','Turn on desktop pop-ups for mentions');en.style.cssText='width:100%;margin-bottom:6px;font-size:12px';en.onclick=()=>Notification.requestPermission().then(()=>notifPanel(true));p.append(en)}
+  if(!notifs.length)p.append(E('small','nempty','No mentions yet. When someone types @'+((S.users.find(u=>u.key==S.me.key)||{}).name||'you')+' you will see it here.'));
+  notifs.forEach(n=>{
+    const r=E('div','ni'+(n.read?'':' new'));
+    r.append(E('div',0,n.fromName+' mentioned you in #'+n.chName),E('p',0,n.text),E('small',0,new Date(n.ts).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})));
+    r.onclick=()=>{if(!n.read)tx({t:'notifread',id:n.id});p.remove();const c=S.channels.find(x=>x.id==n.ch);if(!c)return toast('That channel is not available any more');jumpId=n.msg;if(cur&&cur.id==c.id)jumpTo();else pick(c)};
+    p.append(r);
+  });
+}
+function jumpTo(){   // open a mention: scroll to the message and flash it
+  if(!jumpId)return;const e=document.querySelector('.m[data-id="'+CSS.escape(String(jumpId))+'"]');jumpId=null;
+  if(!e)return toast('That message was deleted or is too old');e.scrollIntoView({block:'center'});e.classList.add('flash');setTimeout(()=>e.classList.remove('flash'),2000);
+}
+function sMention(){try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=880;g.gain.setValueAtTime(.12,actx.currentTime);g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+.35);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+.35)}catch{}}
+function deskNotify(n){   // a desktop pop-up when the tab is in the background (if the browser allows it)
+  try{if(document.hidden&&'Notification'in window&&Notification.permission=='granted')new Notification(n.fromName+' mentioned you',{body:n.text,icon:'/theme/logo'})}catch{}
+}
+// @ autocomplete in the message box
+let mq=null;
+function mentionBox(){
+  const i=$('#txt'),pos=i.selectionStart,before=i.value.slice(0,pos),at=before.lastIndexOf('@');
+  let box=$('#mbox');
+  const q=at>=0&&(at==0||/\s/.test(before[at-1]))?before.slice(at+1):null;
+  if(q==null||q.length>20||/\n/.test(q)){box&&box.remove();mq=null;return}
+  const list=S.users.filter(u=>!u.banned&&u.key!=S.me.key&&u.name.toLowerCase().startsWith(q.toLowerCase())).sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).slice(0,8);
+  if(!list.length){box&&box.remove();mq=null;return}
+  if(!box){box=E('div');box.id='mbox';$('#send').append(box)}
+  mq={at,end:pos,list,sel:mq&&mq.list.length==list.length?Math.min(mq.sel,list.length-1):0};
+  box.replaceChildren();
+  list.forEach((u,ix)=>{const r=E('div','mo'+(ix==mq.sel?' on':''));r.append(avEl(u.key,u.name),E('span',0,u.name));const c=nameColor(u);if(c)r.lastChild.style.color=c;r.onmousedown=e=>{e.preventDefault();mq.sel=ix;pickMention()};box.append(r)});
+}
+function pickMention(){
+  const i=$('#txt'),u=mq.list[mq.sel],ins='@'+u.name+' ';
+  i.value=(i.value.slice(0,mq.at)+ins+i.value.slice(mq.end)).slice(0,500);i.focus();i.selectionStart=i.selectionEnd=mq.at+ins.length;
+  $('#mbox')&&$('#mbox').remove();mq=null;
+}
 function addMsg(m){
   const d=E('div','m');d.append(avEl(m.key,m.name));
   const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
@@ -330,7 +399,8 @@ function addMsg(m){
   const mid=m.id||m.ts;d.dataset.id=mid;
   const rb=E('button','x rbtn','😊+');rb.title='React';rb.onclick=e=>{e.stopPropagation();emojiPop(rb,em=>tx({t:'react',ch:cur.id,id:mid,e:em}))};h.append(' ',rb);
   if(S.me.role=='admin'){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}
-  const rx=E('div','rx');b.append(h,E('p',0,m.text),rx);d.append(b);drawRx(rx,mid,m.re);
+  const rx=E('div','rx');b.append(h,msgText(m.text),rx);d.append(b);drawRx(rx,mid,m.re);
+  if((m.men||[]).includes(S.me.key))d.classList.add('mentioned');   // a message that mentions me stands out
   const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
 }
 /* ---------- Install as an app (own window, taskbar/desktop icon, no browser bars) ---------- */
@@ -574,7 +644,7 @@ function appearance(){
   modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
-function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
+function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0)+(typeof notifs!='undefined'?notifs.filter(x=>!x.read).length:0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
   if(!document.hidden&&cur&&unread[cur.id]){delete unread[cur.id];tx({t:'read',ch:cur.id});showUnread()}
 });
@@ -644,7 +714,8 @@ function render(){
   const th=E('button',0,'◐');th.title='Dark / Light';th.onclick=()=>{const d=document.documentElement;d.dataset.theme=localStorage.th=d.dataset.theme=='dark'?'light':'dark'};
   const st=E('button',0,'⚙');st.title='Settings';st.onclick=settings;
   const lo=E('button',0,'⎋');lo.title='Log out';lo.onclick=()=>{want(null);delete localStorage.tk;location.reload()};
-  r2.append(mic,hp,th,st,lo);f.append(r1,r2);
+  const bl=E('button','bell',' 🔔');bl.id='bell';bl.title='Mentions';bl.onclick=e=>{e.stopPropagation();notifPanel()};
+  r2.append(mic,hp,bl,th,st,lo);f.append(r1,r2);drawBell();
   // main
   const txt=cur&&cur.type=='text',brk=cur&&cur.type=='bracket';
   $('#title').textContent=cur?(brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
@@ -781,6 +852,14 @@ $('#file').onchange=e=>{
   i.src=URL.createObjectURL(f);e.target.value='';
 };
 $('#emob').onclick=e=>{e.stopPropagation();emojiPop($('#emob'),em=>{const i=$('#txt'),a=i.selectionStart??i.value.length,z=i.selectionEnd??a;i.value=(i.value.slice(0,a)+em+i.value.slice(z)).slice(0,500);i.focus();i.selectionStart=i.selectionEnd=a+em.length})};
+$('#txt').addEventListener('input',mentionBox);$('#txt').addEventListener('click',mentionBox);
+$('#txt').addEventListener('blur',()=>setTimeout(()=>{$('#mbox')&&$('#mbox').remove();mq=null},150));
+$('#txt').addEventListener('keydown',e=>{
+  if(!mq||!$('#mbox'))return;
+  if(e.key=='ArrowDown'||e.key=='ArrowUp'){e.preventDefault();mq.sel=(mq.sel+(e.key=='ArrowDown'?1:-1)+mq.list.length)%mq.list.length;[...$('#mbox').children].forEach((r,ix)=>r.classList.toggle('on',ix==mq.sel))}
+  else if(e.key=='Enter'||e.key=='Tab'){e.preventDefault();pickMention()}
+  else if(e.key=='Escape'){$('#mbox').remove();mq=null}
+});
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
 
 /* ---------- Drag and drop (channels, categories) ---------- */
