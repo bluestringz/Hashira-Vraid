@@ -40,7 +40,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .mob.dot{position:relative}.mob.dot::after{content:'';position:absolute;top:4px;right:4px;width:9px;height:9px;border-radius:50%;background:var(--red)}
 .brkm{margin:6px 0 2px;font-weight:700}
 #bbox{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
-.brk{position:relative;width:100%;max-width:1400px;aspect-ratio:1671/941;background:url(/bracket.jpg) center/cover no-repeat;border-radius:10px;container-type:inline-size;flex:none}
+.brk{position:relative;width:100%;max-width:1400px;aspect-ratio:1670/941;background:url(/bracket.jpg?v=2) center/cover no-repeat;border-radius:10px;container-type:inline-size;flex:none}
 .bs{position:absolute;display:flex;align-items:center;justify-content:center;padding:0 1.6cqw;box-sizing:border-box;color:#fff;font-family:Rajdhani,system-ui,sans-serif;font-weight:700;font-size:1.9cqw;letter-spacing:.02em;text-transform:uppercase;text-shadow:0 0 6px #000,0 2px 3px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bs span{white-space:nowrap}
 .bs.champ{font-size:2.3cqw;color:#ffd166}
@@ -297,9 +297,7 @@ async function installApp(){
    The picture is the design; names sit on top of its slots. Only the admin can type names (click a slot).
    Left 4 -> left finalist (SL), right 4 -> right finalist (SR), SL vs SR -> champion (F, under the crown). */
 const BRK={id:'~bracket',type:'bracket',name:'Tournament Bracket'};
-const BSLOT={L1:[3.71,44.10,16.04,5.31],L2:[3.71,52.28,16.04,5.63],L3:[3.71,61.42,16.04,5.74],L4:[3.71,70.14,16.04,5.84],
-  SL:[26.63,58.66,11.97,5.10],F:[42.19,63.76,15.56,6.16],SR:[61.16,58.66,12.15,5.10],
-  R1:[80.19,44.10,16.16,5.31],R2:[80.19,52.28,16.16,5.63],R3:[80.19,61.42,16.16,5.74],R4:[80.19,70.14,16.16,5.84]};
+const BSLOT={L1:[3.71,43.89,16.17,5.63],L2:[3.71,52.28,16.17,5.74],L3:[3.71,61.32,16.17,5.84],L4:[3.71,70.14,16.17,5.95],SL:[26.65,58.45,12.16,5.31],F:[42.22,62.91,15.57,5.10],SR:[61.20,58.45,12.34,5.31],R1:[80.12,43.89,16.41,5.63],R2:[80.12,52.28,16.41,5.74],R3:[80.12,61.32,16.41,5.84],R4:[80.12,70.14,16.41,5.95]};
 const BNEXT={L1:'SL',L2:'SL',L3:'SL',L4:'SL',R1:'SR',R2:'SR',R3:'SR',R4:'SR',SL:'F',SR:'F'};
 const BLBL={SL:'Left finalist',SR:'Right finalist',F:'Champion'};
 let bEdit=null;
