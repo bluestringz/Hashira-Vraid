@@ -40,13 +40,23 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .mob.dot{position:relative}.mob.dot::after{content:'';position:absolute;top:4px;right:4px;width:9px;height:9px;border-radius:50%;background:var(--red)}
 .brkm{margin:6px 0 2px;font-weight:700}
 #bbox{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
-.brk{position:relative;width:100%;max-width:1400px;aspect-ratio:1670/941;background:url(/bracket.jpg?v=2) center/cover no-repeat;border-radius:10px;container-type:inline-size;flex:none}
-.bs{position:absolute;display:flex;align-items:center;justify-content:center;padding:0 1.6cqw;box-sizing:border-box;color:#fff;font-family:Rajdhani,system-ui,sans-serif;font-weight:700;font-size:1.9cqw;letter-spacing:.02em;text-transform:uppercase;text-shadow:0 0 6px #000,0 2px 3px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bs span{white-space:nowrap}
-.bs.champ{font-size:2.3cqw;color:#ffd166}
-.bs.empty span{opacity:.45;font-size:.75em;font-weight:500;text-transform:none;letter-spacing:0}
-.bs input{width:100%;height:80%;background:rgba(0,0,0,.75);border:1px solid var(--red);border-radius:4px;color:#fff;font:inherit;text-align:center;padding:0 4px;margin:0}
 .bhint{color:var(--mut)}
+.bk2{position:relative;width:100%;max-width:1400px;aspect-ratio:16/9;background:#0b0708 center/cover no-repeat;border-radius:10px;container-type:inline-size;flex:none;overflow:hidden;user-select:none;touch-action:none}
+.bk2.edit{outline:1px dashed rgba(255,255,255,.25)}.bk2.pen{cursor:crosshair}
+.bklines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.bk2.edit .bklines .bkhit{pointer-events:stroke;cursor:pointer}.bklines .bkhit.sel{stroke:rgba(255,209,102,.45)}
+.bk2s{position:absolute;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:0 6%;font-family:Rajdhani,system-ui,sans-serif;font-weight:700;letter-spacing:.02em;text-transform:uppercase;text-shadow:0 0 6px #000,0 2px 3px #000;white-space:nowrap}
+.bk2.edit .bk2s{cursor:move}.bk2.pen .bk2s{pointer-events:none}
+.bk2s .bksh{position:absolute;inset:0;width:100%;height:100%;z-index:0;overflow:visible}
+.bk2s .bkt{position:relative;z-index:1;white-space:nowrap}
+.bk2s.empty .bkt{opacity:.45;font-size:.7em;font-weight:500;text-transform:none;letter-spacing:0}
+.bk2s.sel{outline:2px dashed #ffd166;outline-offset:3px}
+.bk2s input{width:100%;background:rgba(0,0,0,.75);border:1px solid var(--red);border-radius:4px;color:#fff;font:inherit;text-align:center;padding:2px 4px;margin:0;min-width:120px}
+.bkrs{position:absolute;right:-6px;bottom:-6px;width:14px;height:14px;border-radius:3px;background:#ffd166;border:2px solid #000;cursor:nwse-resize;z-index:2}
+.bksel{position:absolute;z-index:5;display:flex;gap:4px;flex-wrap:nowrap;background:rgba(10,6,8,.92);border:1px solid var(--bd);border-radius:8px;padding:4px}
+.bksel button,.bktool button{font-size:12px;padding:4px 8px;white-space:nowrap}.bksel button.on,.bktool button.on{background:#ffd166;color:#000;border-color:#ffd166}
+.bktool{display:flex;flex-wrap:wrap;gap:8px;align-items:center;width:100%;max-width:1400px;background:var(--pan);border:1px solid var(--bd);border-radius:10px;padding:8px}
+.bktool select{width:auto}.bkc input[type=range]{width:110px;padding:0;border:0;background:none}.bkc{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mut)}.bkc input[type=color]{width:32px;height:26px}
 .ch .badge{margin-left:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .ch:hover,.ch.on{background:var(--pan2)}.ch.on{border-left:3px solid var(--red)}
 .ch span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -65,7 +75,14 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #top h2{margin:0;font-size:22px;flex:1}
 #msgs{flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
 .m{display:flex;gap:10px}.m p{margin:2px 0 0;word-break:break-word}.m small{color:var(--mut)}
-.m .del{opacity:0}.m:hover .del{opacity:1}@media(hover:none){.m .del{opacity:1}}
+.m .del,.m .rbtn{opacity:0}.m:hover .rbtn{opacity:1}
+.rbtn{font-size:12px;padding:0 5px;line-height:18px}
+.rx{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.rx:empty{display:none}
+.rchip{font-size:13px;padding:1px 7px;border-radius:10px;background:var(--pan2);border:1px solid var(--bd);line-height:20px}
+.rchip.mine{border-color:var(--btn,var(--red));background:rgba(225,29,46,.18)}
+.emop{position:fixed;z-index:60;display:grid;grid-template-columns:repeat(7,34px);gap:2px;padding:6px;background:#140a0e;border:1px solid var(--bd);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.emop button{font-size:20px;padding:2px;border:0;background:none;border-radius:6px;cursor:pointer;line-height:30px}.emop button:hover{background:var(--pan2)}
+#emob{font-size:18px;padding:0 10px}.m:hover .del{opacity:1}@media(hover:none){.m .del,.m .rbtn{opacity:1}}
 .acts{display:flex;gap:4px}
 .sec[draggable=true],.ch[draggable=true]{cursor:grab}
 .dt{box-shadow:inset 0 2px 0 var(--red)}.db{box-shadow:inset 0 -2px 0 var(--red)}
@@ -176,7 +193,7 @@ input[type=color]{width:48px;height:36px;padding:2px;border-radius:6px;cursor:po
   <main>
     <div id="top"><button id="navBtn" class="mob" aria-label="Channels">☰</button><h2 id="title"></h2><span id="topact"></span><button id="memBtn" class="mob" aria-label="Members">👥</button></div>
     <div id="msgs"></div>
-    <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
+    <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button type="button" id="emob" title="Emoji">😊</button><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
     <div id="bbox" class="hide"></div>
   </main>
@@ -261,6 +278,7 @@ function on(m){
   else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
   else if(m.t=='kicked'||m.t=='denied'){want(null);leaveVoice(true);toast(m.by?'You were disconnected from voice by a moderator':'You no longer have access to that voice channel')}
   else if(m.t=='error')alert(m.msg);
+  else if(m.t=='react'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"] .rx');e&&drawRx(e,m.id,m.re)}
   else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
   else if(m.t=='clear'){delete unread[m.ch];showUnread();if(cur&&m.ch==cur.id)$('#msgs').replaceChildren();else render()}
 }
@@ -284,14 +302,35 @@ function rolesOf(u){
 function nameColor(u){const top=u?rolesOf(u)[0]:'default';return top=='default'?'':(S.roles[top]||{}).color||''}
 function paintName(nb){const u=S.users.find(x=>x.key==nb.dataset.k);nb.textContent=(u?u.name:nb.dataset.n)+' ';nb.style.color=nameColor(u)}
 function repaintNames(){document.querySelectorAll('#msgs b.nm').forEach(paintName)}   // names/roles changed: update old messages too
+/* ---------- Emoji: reactions on messages + a picker for typing ---------- */
+const EMOJI='👍 ❤️ 😂 🤣 😮 😢 😡 🔥 💯 👏 🙏 🎉 ⚔️ 🛡️ 🏹 🪄 💀 🩸 ⚡ 🐉 🥷 👑 🏆 🎯 ✅ ❌ 👀 🫡'.split(' ');
+function drawRx(el,mid,re){   // the little reaction chips under a message; click one to add/remove yours
+  el.replaceChildren();
+  Object.entries(re||{}).forEach(([e,who])=>{
+    const mine=who.includes(S.me.key),c=E('button','rchip'+(mine?' mine':''),e+' '+who.length);
+    c.title=who.map(k=>(S.users.find(u=>u.key==k)||{name:k}).name).join(', ')+' reacted with '+e;
+    c.onclick=()=>tx({t:'react',ch:cur.id,id:mid,e});el.append(c);
+  });
+}
+let emoP=null;
+function emojiPop(anchor,pick){
+  if(emoP){emoP.remove();emoP=null}
+  const p=E('div','emop');EMOJI.forEach(e=>{const b=E('button',0,e);b.onclick=ev=>{ev.stopPropagation();pick(e);p.remove();emoP=null};p.append(b)});
+  document.body.append(p);emoP=p;
+  const r=anchor.getBoundingClientRect(),pw=p.offsetWidth,ph=p.offsetHeight;
+  p.style.left=Math.max(8,Math.min(innerWidth-pw-8,r.right-pw))+'px';
+  p.style.top=(r.top-ph-6>8?r.top-ph-6:Math.min(innerHeight-ph-8,r.bottom+6))+'px';
+  setTimeout(()=>addEventListener('click',function off(ev){if(!p.contains(ev.target)){p.remove();if(emoP===p)emoP=null;removeEventListener('click',off)}}),0);
+}
 function addMsg(m){
   const d=E('div','m');d.append(avEl(m.key,m.name));
   const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
   const nb=E('b','nm');nb.dataset.k=m.key;nb.dataset.n=m.name;paintName(nb);nb.oncontextmenu=e=>{const x=S.users.find(y=>y.key==m.key);if(x)userMenu(e,x)};
   h.append(nb,E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
   const mid=m.id||m.ts;d.dataset.id=mid;
+  const rb=E('button','x rbtn','😊+');rb.title='React';rb.onclick=e=>{e.stopPropagation();emojiPop(rb,em=>tx({t:'react',ch:cur.id,id:mid,e:em}))};h.append(' ',rb);
   if(S.me.role=='admin'){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}
-  b.append(h,E('p',0,m.text));d.append(b);
+  const rx=E('div','rx');b.append(h,E('p',0,m.text),rx);d.append(b);drawRx(rx,mid,m.re);
   const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
 }
 /* ---------- Install as an app (own window, taskbar/desktop icon, no browser bars) ---------- */
@@ -306,50 +345,190 @@ async function installApp(){
     E('small',0,'Android (Chrome): ⋮ menu > "Add to Home screen" or "Install app".'),
     E('small',0,'iPhone/iPad (Safari): Share button > "Add to Home Screen".'));
 }
-/* ---------- Tournament bracket ----------
-   The picture is the design; names sit on top of its slots. Only the admin can type names (click a slot).
-   Left 4 -> left finalist (SL), right 4 -> right finalist (SR), SL vs SR -> champion (F, under the crown). */
+/* ---------- Tournament bracket (layout editor) ----------
+   Everyone sees the bracket. The admin can:
+   - type team names (click a box), right-click a team to send it to another box (next round);
+   - "Edit layout": add boxes (3 shapes, or text only), drag and resize them, draw straight lines
+     (only across or up/down, like a pen tool that never curves), pick colours, change the background.
+   Positions are in a 1600 x 900 canvas, so it looks the same on every screen size. */
 const BRK={id:'~bracket',type:'bracket',name:'Tournament Bracket'};
-const BSLOT={L1:[3.71,43.89,16.17,5.63],L2:[3.71,52.28,16.17,5.74],L3:[3.71,61.32,16.17,5.84],L4:[3.71,70.14,16.17,5.95],SL:[26.65,58.45,12.16,5.31],F:[42.22,62.91,15.57,5.10],SR:[61.20,58.45,12.34,5.31],R1:[80.12,43.89,16.41,5.63],R2:[80.12,52.28,16.41,5.74],R3:[80.12,61.32,16.41,5.84],R4:[80.12,70.14,16.41,5.95]};
-const BNEXT={L1:'SL',L2:'SL',L3:'SL',L4:'SL',R1:'SR',R2:'SR',R3:'SR',R4:'SR',SL:'F',SR:'F'};
-const BLBL={SL:'Left finalist',SR:'Right finalist',F:'Champion'};
-let bEdit=null;
-function fitBracket(){   // long team names: shrink the text to fit the slot instead of cutting it off
-  document.querySelectorAll('#bbox .bs:not(.empty) span').forEach(t=>{
-    t.style.fontSize='';const box=t.parentElement,cs=getComputedStyle(box);
-    const room=box.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);let f=100;
+const BW=1600,BH=900,BGRID=5;
+const BSHAPES={a:'Slant ↗',b:'Slant ↖',c:'Center',none:'Text only'};
+let bkEdit=false,bkLocal=null,bkSel=null,bkPen=null,bkPick=null,bkBusy=false,bkTimer=null,bkNameEdit=null;
+const bkDef=()=>({slots:[],lines:[],colors:{}});
+const bkData=()=>bkLocal||S.bk||bkDef();
+const bkCol=()=>Object.assign({box:'#e11d2e',line:'#ffffff',text:'#ffffff',champ:'#ffd166',lw:4},bkData().colors||{});
+const bkId=()=>Math.random().toString(36).slice(2,9);
+const snapG=v=>Math.round(v/BGRID)*BGRID;
+function bkSave(){clearTimeout(bkTimer);bkTimer=setTimeout(()=>tx({t:'bklayout',data:bkLocal}),250)}   // layout edits: saved a moment after you stop
+function bkShape(shape,col){   // the box artwork, drawn to fill the box
+  if(shape=='none')return null;
+  const P={a:[[0,0],[92,0],[100,100],[8,100]],b:[[8,0],[100,0],[92,100],[0,100]],c:[[0,0],[100,0],[93,100],[7,100]]}[shape]||[[0,0],[100,0],[100,100],[0,100]];
+  const pts=P.map(p=>p.join(',')).join(' ');
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+  svg.setAttribute('viewBox','0 0 100 100');svg.setAttribute('preserveAspectRatio','none');svg.classList.add('bksh');
+  const el=(t,a)=>{const e=document.createElementNS(ns,t);Object.entries(a).forEach(([k,v])=>e.setAttribute(k,v));svg.append(e);return e};
+  el('polygon',{points:pts,fill:'rgba(12,10,11,.92)',stroke:col,'stroke-width':1.5,'vector-effect':'non-scaling-stroke'});
+  el('polygon',{points:pts,fill:'url(#bkgl)',opacity:.9});   // soft top shine
+  el('line',{x1:P[0][0],y1:P[0][1],x2:P[3][0],y2:P[3][1],stroke:col,'stroke-width':7,'vector-effect':'non-scaling-stroke'});   // thick slanted ends, like the original design
+  el('line',{x1:P[1][0],y1:P[1][1],x2:P[2][0],y2:P[2][1],stroke:col,'stroke-width':7,'vector-effect':'non-scaling-stroke'});
+  return svg;
+}
+function bkUnits(e,cv){const r=cv.getBoundingClientRect();return [(e.clientX-r.left)/r.width*BW,(e.clientY-r.top)/r.height*BH]}
+function bkSnap(x,y,skip){   // lines: stick to box edges/centres and other line points when close
+  const d=bkData(),xs=[],ys=[];
+  d.slots.forEach(s=>{xs.push(s.x,s.x+s.w,s.x+s.w/2);ys.push(s.y,s.y+s.h,s.y+s.h/2)});
+  d.lines.forEach(l=>l.pts.forEach(p=>{xs.push(p[0]);ys.push(p[1])}));
+  (skip||[]).forEach(p=>{xs.push(p[0]);ys.push(p[1])});
+  const near=(v,arr)=>{let b=null,bd=12;arr.forEach(a=>{const dd=Math.abs(a-v);if(dd<bd){bd=dd;b=a}});return b};
+  const nx=near(x,xs),ny=near(y,ys);return [nx!=null?nx:snapG(x),ny!=null?ny:snapG(y)];
+}
+function bkOrtho(prev,x,y){   // pen: only straight across or straight up/down from the last point
+  return Math.abs(x-prev[0])>=Math.abs(y-prev[1])?[x,prev[1]]:[prev[0],y];
+}
+function drawBracket(){
+  const box=$('#bbox'),adm=S.me.role=='admin',d=bkData(),c=bkCol();
+  if(bkBusy||bkNameEdit&&box.querySelector('.bk2s input'))return;   // don't redraw under a drag or while typing
+  box.replaceChildren();
+  if(adm&&bkEdit)box.append(bkToolbar());
+  const cv=E('div','bk2'+(bkEdit?' edit':'')+(bkPen?' pen':''));
+  cv.style.backgroundImage=`url(/theme/bracket?v=${(S.theme&&S.theme.v)||0})`;
+  // lines
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+  svg.setAttribute('viewBox',`0 0 ${BW} ${BH}`);svg.setAttribute('preserveAspectRatio','none');svg.classList.add('bklines');
+  svg.innerHTML='<defs><linearGradient id="bkgl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".10"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>';
+  const poly=(pts,cls,col,w)=>{const p=document.createElementNS(ns,'polyline');p.setAttribute('points',pts.map(q=>q.join(',')).join(' '));p.setAttribute('fill','none');p.setAttribute('stroke',col);p.setAttribute('stroke-width',w);p.setAttribute('stroke-linejoin','miter');p.setAttribute('stroke-linecap','square');if(cls)p.setAttribute('class',cls);svg.append(p);return p};
+  d.lines.forEach(l=>{
+    poly(l.pts,'',c.line,c.lw);
+    if(bkEdit&&!bkPen){const hit=poly(l.pts,'bkhit'+(bkSel&&bkSel.id==l.id?' sel':''),'transparent',Math.max(18,c.lw+12));
+      hit.addEventListener('pointerdown',e=>{e.stopPropagation();bkSel={type:'line',id:l.id};drawBracket()})}
+  });
+  let prevLine=null;
+  if(bkPen){prevLine=poly(bkPen.pts,'bkpen',c.line,c.lw)}
+  cv.append(svg);
+  // boxes
+  d.slots.forEach(sl=>{
+    const s=E('div','bk2s'+(sl.champ?' champ':'')+(sl.name?'':' empty')+(bkSel&&bkSel.id==sl.id?' sel':''));
+    s.style.cssText=`left:${sl.x/BW*100}%;top:${sl.y/BH*100}%;width:${sl.w/BW*100}%;height:${sl.h/BH*100}%;font-size:${(sl.h*0.42/16).toFixed(2)}cqw;color:${sl.champ?c.champ:c.text}`;
+    const sh=bkShape(sl.shape||'a',c.box);if(sh)s.append(sh);
+    const t=E('span','bkt',sl.name||(adm?(sl.champ?'Champion':bkEdit?'':'Click to add team'):''));s.append(t);
+    if(adm&&!bkEdit){
+      s.title='Click to type a team name • right-click for more';
+      s.onclick=()=>{if(bkPick){const n=bkPick;bkPick=null;tx({t:'bkname',id:sl.id,name:n});return}bkNameInput(s,sl)};
+      s.oncontextmenu=e=>ctx(e,[sl.name||'Empty box',...(sl.name?[['Send to another box… (then click it)',()=>{bkPick=sl.name;toast('Now click the box to send "'+sl.name+'" to')}],['Clear this box',()=>tx({t:'bkname',id:sl.id,name:''}),'dng']]:[])]);
+    }
+    if(adm&&bkEdit&&!bkPen){
+      s.ondblclick=()=>bkNameInput(s,sl);
+      s.addEventListener('pointerdown',e=>bkDrag(e,cv,sl,'move'));
+      const rs=E('div','bkrs');rs.title='Drag to resize';rs.addEventListener('pointerdown',e=>{e.stopPropagation();bkDrag(e,cv,sl,'size')});s.append(rs);
+    }
+    cv.append(s);
+  });
+  // selected item: small action bar
+  if(adm&&bkEdit&&bkSel&&!bkPen){
+    const bar=E('div','bksel');
+    if(bkSel.type=='slot'){
+      const sl=d.slots.find(x=>x.id==bkSel.id);
+      if(sl){
+        bar.style.cssText=`left:${sl.x/BW*100}%;top:calc(${sl.y/BH*100}% - 38px)`;
+        Object.entries(BSHAPES).forEach(([k,n])=>{const b=E('button',(sl.shape||'a')==k?'on':'',n);b.onclick=e=>{e.stopPropagation();sl.shape=k;bkSave();drawBracket()};bar.append(b)});
+        const ch=E('button',sl.champ?'on':'','👑 Champion text');ch.title='Use the champion text colour';ch.onclick=()=>{sl.champ=!sl.champ;bkSave();drawBracket()};
+        const du=E('button',0,'Duplicate');du.onclick=()=>{const n={...sl,id:bkId(),x:Math.min(BW-sl.w,sl.x+20),y:Math.min(BH-sl.h,sl.y+sl.h+10),name:''};d.slots.push(n);bkSel={type:'slot',id:n.id};bkSave();drawBracket()};
+        const de=E('button','dng','Delete');de.onclick=()=>bkDelete();
+        bar.append(ch,du,de);cv.append(bar);
+      }
+    }else{
+      const l=d.lines.find(x=>x.id==bkSel.id);
+      if(l){bar.style.cssText=`left:${l.pts[0][0]/BW*100}%;top:calc(${l.pts[0][1]/BH*100}% - 38px)`;const de=E('button','dng','Delete line');de.onclick=()=>bkDelete();bar.append(de);cv.append(bar)}
+    }
+  }
+  // pen tool: click to add points, double-click / Enter / right-click to finish, Esc to cancel
+  if(bkPen){
+    const pv=poly([],'bkpv',c.line,c.lw);pv.setAttribute('stroke-dasharray','8 6');
+    cv.onpointermove=e=>{if(!bkPen.pts.length)return;const last=bkPen.pts[bkPen.pts.length-1];let [x,y]=bkUnits(e,cv);[x,y]=bkOrtho(last,x,y);[x,y]=bkOrtho(last,...bkSnap(x,y,bkPen.pts));pv.setAttribute('points',last.join(',')+' '+x+','+y)};
+    cv.onclick=e=>{let [x,y]=bkUnits(e,cv);if(bkPen.pts.length){const last=bkPen.pts[bkPen.pts.length-1];[x,y]=bkOrtho(last,x,y);[x,y]=bkOrtho(last,...bkSnap(x,y,bkPen.pts));if(x==last[0]&&y==last[1])return}else[x,y]=bkSnap(x,y);bkPen.pts.push([x,y]);prevLine.setAttribute('points',bkPen.pts.map(q=>q.join(',')).join(' '))};
+    cv.ondblclick=e=>{e.preventDefault();bkFinishLine()};
+    cv.oncontextmenu=e=>{e.preventDefault();bkFinishLine()};
+  }else if(bkEdit){
+    cv.addEventListener('pointerdown',e=>{if(e.target===cv||e.target===svg){bkSel=null;drawBracket()}});
+  }
+  box.append(cv);bkFit();
+  if(adm)box.append(E('small','bhint',bkEdit?(bkPen?'Drawing a line: click to add corners (it only goes straight across or up/down). Double-click, Enter or right-click to finish. Esc cancels.':'Drag a box to move it, drag its corner to resize. Double-click a box to type a name. Click a line to select it. Delete key removes the selected item, arrow keys nudge it.'):'Click a box to type a team name. Right-click a team to send it to the next box. Use "Edit layout" to change the design.'));
+}
+function bkNameInput(s,sl){
+  if(s.querySelector('input'))return;
+  const i=E('input');i.maxLength=40;i.value=sl.name||'';i.placeholder='Team name';bkNameEdit=sl.id;
+  const save=()=>{if(bkNameEdit!==sl.id)return;bkNameEdit=null;const v=i.value.trim();if(v!==(sl.name||'')){if(bkLocal){sl.name=v;bkSave()}else tx({t:'bkname',id:sl.id,name:v})}drawBracket()};
+  i.onkeydown=e=>{e.stopPropagation();if(e.key=='Enter')i.blur();if(e.key=='Escape'){i.value=sl.name||'';i.blur()}};
+  i.onpointerdown=e=>e.stopPropagation();i.onblur=save;
+  const t=s.querySelector('.bkt');t.replaceChildren(i);i.focus();i.select();
+}
+function bkDrag(e,cv,sl,mode){
+  if(e.button!==0)return;e.preventDefault();
+  bkSel={type:'slot',id:sl.id};bkBusy=true;
+  const [sx,sy]=bkUnits(e,cv),o={x:sl.x,y:sl.y,w:sl.w,h:sl.h},el=e.currentTarget.closest?e.currentTarget.closest('.bk2s')||e.currentTarget:e.currentTarget;
+  el.classList.add('sel');
+  const mv=ev=>{const [x,y]=bkUnits(ev,cv),dx=x-sx,dy=y-sy;
+    if(mode=='move'){sl.x=Math.max(0,Math.min(BW-sl.w,snapG(o.x+dx)));sl.y=Math.max(0,Math.min(BH-sl.h,snapG(o.y+dy)))}
+    else{sl.w=Math.max(60,Math.min(BW-sl.x,snapG(o.w+dx)));sl.h=Math.max(25,Math.min(BH-sl.y,snapG(o.h+dy)))}
+    el.style.left=sl.x/BW*100+'%';el.style.top=sl.y/BH*100+'%';el.style.width=sl.w/BW*100+'%';el.style.height=sl.h/BH*100+'%';el.style.fontSize=(sl.h*0.42/16).toFixed(2)+'cqw'};
+  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);bkBusy=false;if(sl.x!=o.x||sl.y!=o.y||sl.w!=o.w||sl.h!=o.h)bkSave();drawBracket()};
+  addEventListener('pointermove',mv);addEventListener('pointerup',up);
+}
+function bkDelete(){
+  if(!bkSel||!bkLocal)return;
+  if(bkSel.type=='slot')bkLocal.slots=bkLocal.slots.filter(x=>x.id!=bkSel.id);else bkLocal.lines=bkLocal.lines.filter(x=>x.id!=bkSel.id);
+  bkSel=null;bkSave();drawBracket();
+}
+function bkFinishLine(){
+  if(bkPen&&bkPen.pts.length>=2){bkLocal.lines.push({id:bkId(),pts:bkPen.pts});bkSave()}
+  bkPen={pts:[]};drawBracket();   // stay in pen mode for the next line
+}
+addEventListener('keydown',e=>{
+  if(!cur||cur.type!='bracket'||!bkEdit||/input|textarea|select/i.test(document.activeElement.tagName))return;
+  if(bkPen){if(e.key=='Enter')bkFinishLine();if(e.key=='Escape'){bkPen={pts:[]};drawBracket()}return}
+  if(!bkSel)return;
+  if(e.key=='Delete'||e.key=='Backspace'){e.preventDefault();bkDelete();return}
+  const mv={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+  if(mv&&bkSel.type=='slot'){e.preventDefault();const sl=bkLocal.slots.find(x=>x.id==bkSel.id);if(!sl)return;const st=e.shiftKey?20:BGRID;
+    sl.x=Math.max(0,Math.min(BW-sl.w,sl.x+mv[0]*st));sl.y=Math.max(0,Math.min(BH-sl.h,sl.y+mv[1]*st));bkSave();drawBracket()}
+});
+function bkToolbar(){
+  const t=E('div','bktool'),c=bkCol();
+  let shape='a';
+  const add=E('button','p','+ Add bracket');
+  const sel=E('select');Object.entries(BSHAPES).forEach(([k,n])=>{const o=E('option',0,n);o.value=k;sel.append(o)});sel.onchange=()=>shape=sel.value;
+  add.onclick=()=>{const n={id:bkId(),x:720,y:420,w:260,h:55,shape,champ:shape=='c',name:''};bkLocal.slots.push(n);bkSel={type:'slot',id:n.id};bkPen=null;bkSave();drawBracket()};
+  const pen=E('button',bkPen?'on':'',bkPen?'✓ Finish drawing':'✎ Add line');
+  pen.onclick=()=>{if(bkPen){bkFinishLine();bkPen=null}else{bkPen={pts:[]};bkSel=null}drawBracket()};
+  const colr=(label,key)=>{const w=E('label','bkc');const i=E('input');i.type='color';i.value=c[key];i.oninput=()=>{bkLocal.colors=Object.assign({},bkLocal.colors,{[key]:i.value});bkSave();drawBracket()};w.append(i,E('span',0,label));return w};
+  const lw=E('label','bkc');const lwi=E('input');lwi.type='range';lwi.min=1;lwi.max=14;lwi.value=c.lw;lwi.onchange=()=>{bkLocal.colors=Object.assign({},bkLocal.colors,{lw:+lwi.value});bkSave();drawBracket()};lw.append(E('span',0,'Line thickness'),lwi);
+  const bg=E('button',0,'Background…');bg.onclick=bkBackground;
+  const done=E('button','p','Done');done.onclick=()=>{clearTimeout(bkTimer);if(bkLocal)tx({t:'bklayout',data:bkLocal});bkEdit=false;bkLocal=null;bkSel=null;bkPen=null;render()};
+  t.append(sel,add,pen,colr('Bracket','box'),colr('Lines','line'),colr('Names','text'),colr('Champion','champ'),lw,bg,done);
+  return t;
+}
+function bkBackground(){
+  const f=E('input');f.type='file';f.accept='image/png,image/jpeg,image/webp';f.style.display='none';
+  const img=E('img','tprev');img.src='/theme/bracket?v='+((S.theme&&S.theme.v)||0);
+  const up=E('button','p','Change background'),rs=E('button',0,'Reset to original'),st=E('small',0,'Best size: 1600 × 900 (16:9).');
+  up.onclick=()=>f.click();
+  f.onchange=async()=>{const file=f.files[0];if(!file)return;if(file.size>8e6)return st.textContent='Picture is too big (max 8 MB)';st.textContent='Uploading…';
+    const r=await fetch('/api/theme/bracket',{method:'POST',headers:{'Content-Type':file.type,Authorization:'Bearer '+tok},body:file}).catch(()=>null);
+    const j=r?await r.json().catch(()=>({})):{};st.textContent=r&&r.ok?'✓ Saved':(j.error||'Could not upload');if(r&&r.ok)setTimeout(()=>{close();drawBracket()},400)};
+  rs.onclick=async()=>{await fetch('/api/theme/bracket',{method:'DELETE',headers:{Authorization:'Bearer '+tok}}).catch(()=>{});setTimeout(()=>{close();drawBracket()},400)};
+  const row=E('div','row');row.append(up,rs);
+  modal('Bracket background',img,row,st,f);
+}
+function bkFit(){   // long team names: shrink to fit the box instead of cutting them off
+  document.querySelectorAll('#bbox .bk2s:not(.empty) .bkt').forEach(t=>{
+    if(t.querySelector('input'))return;t.style.fontSize='';const box=t.parentElement;const room=box.clientWidth*0.8;let f=100;
     while(t.getBoundingClientRect().width>room&&f>40){f-=4;t.style.fontSize=f+'%'}
   });
 }
-addEventListener('resize',()=>{if(cur&&cur.type=='bracket')fitBracket()});
-document.fonts&&document.fonts.ready.then(()=>{if(cur&&cur.type=='bracket')fitBracket()});   // slot the admin is typing in (so live updates don't interrupt)
-function drawBracket(){
-  const box=$('#bbox'),adm=S.me.role=='admin',br=S.bracket||{};
-  if(bEdit&&box.querySelector('input'))return;   // keep the admin's typing
-  box.replaceChildren();
-  const wrap=E('div','brk');
-  Object.entries(BSLOT).forEach(([id,[x,y,w,h]])=>{
-    const s=E('div','bs'+(id=='F'?' champ':'')+(br[id]?'':' empty'));
-    s.style.cssText=`left:${x}%;top:${y}%;width:${w}%;height:${h}%`;
-    const t=E('span',0,br[id]||(adm?(BLBL[id]||'Click to add team'):''));s.append(t);
-    if(adm){
-      s.title='Click to type a team name'+(BNEXT[id]?' • right-click to move to the next round':'');
-      s.onclick=()=>{
-        if(s.querySelector('input'))return;
-        const i=E('input');i.maxLength=40;i.value=br[id]||'';i.placeholder='Team name';bEdit=id;
-        const save=()=>{if(bEdit!==id)return;bEdit=null;const v=i.value.trim();if(v!==(br[id]||''))tx({t:'bracket',slot:id,name:v});drawBracket()};
-        i.onkeydown=e=>{if(e.key=='Enter')i.blur();if(e.key=='Escape'){i.value=br[id]||'';i.blur()}};
-        i.onblur=save;s.replaceChildren(i);i.focus();i.select();
-      };
-      s.oncontextmenu=e=>ctx(e,[br[id]||'Empty slot',
-        ...(br[id]&&BNEXT[id]?[['Move to next round ('+(BLBL[BNEXT[id]]||'')+')',()=>tx({t:'bracket',slot:BNEXT[id],name:br[id]})]]:[]),
-        ...(br[id]?[['Clear this slot',()=>tx({t:'bracket',slot:id,name:''}),'dng']]:[])]);
-    }
-    wrap.append(s);
-  });
-  box.append(wrap);fitBracket();
-  if(adm)box.append(E('small','bhint','Admin: click a slot to type a team name. Right-click a team to move them to the next round.'));
-}
+addEventListener('resize',()=>{if(cur&&cur.type=='bracket')bkFit()});
+document.fonts&&document.fonts.ready.then(()=>{if(cur&&cur.type=='bracket')bkFit()});
+
 /* ---------- Appearance (set by the admin, same for everyone) ---------- */
 let themeV=null;
 function applyTheme(t){
@@ -460,7 +639,11 @@ function render(){
   $('#title').textContent=cur?(brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
   const ta=$('#topact');ta.replaceChildren();
   if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
-  if(me.role=='admin'&&brk){const b=E('button',0,'Clear bracket');b.onclick=()=>confirm('Remove ALL names from the bracket?')&&tx({t:'bracket',reset:1});ta.append(b)}
+  if(me.role=='admin'&&brk&&!bkEdit){
+    const cl=E('button',0,'Clear names');cl.onclick=()=>confirm('Remove ALL team names from the bracket?')&&tx({t:'bkclear'});
+    const ed=E('button','p','Edit layout');ed.onclick=()=>{bkEdit=true;bkLocal=JSON.parse(JSON.stringify(S.bk||bkDef()));bkSel=null;bkPen=null;render()};
+    ta.append(cl,ed);
+  }
   $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!!brk||!cur);$('#bbox').classList.toggle('hide',!brk);
   if(brk)drawBracket();else if(cur&&!txt)panel();
   // members, grouped by role (Admin first, Default last, Banned only visible to moderators)
@@ -586,6 +769,7 @@ $('#file').onchange=e=>{
     tx({t:'avatar',data:c.toDataURL('image/jpeg',.8)})};
   i.src=URL.createObjectURL(f);e.target.value='';
 };
+$('#emob').onclick=e=>{e.stopPropagation();emojiPop($('#emob'),em=>{const i=$('#txt'),a=i.selectionStart??i.value.length,z=i.selectionEnd??a;i.value=(i.value.slice(0,a)+em+i.value.slice(z)).slice(0,500);i.focus();i.selectionStart=i.selectionEnd=a+em.length})};
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
 
 /* ---------- Drag and drop (channels, categories) ---------- */

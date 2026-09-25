@@ -105,6 +105,7 @@ function seedAdmin() {
     save();
   }
   if (U(AU) && !U(AU).roles.includes('admin')) { U(AU).roles.push('admin'); save(); }
+  migrateBracket();
 }
 
 const app = express();
@@ -115,9 +116,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Pictures are kept as files next to data.json (the persistent disk), not inside it, so saving chat stays fast.
 const THEME_DIR = process.env.DATA_DIR || __dirname;
 const themeFile = w => path.join(THEME_DIR, 'theme-' + w);
-const THEME_DEFAULT = { bg: path.join(__dirname, 'public', 'bg.jpg'), logo: path.join(__dirname, 'public', 'logo.png') };
+const THEME_DEFAULT = { bg: path.join(__dirname, 'public', 'bg.jpg'), logo: path.join(__dirname, 'public', 'logo.png'), bracket: path.join(__dirname, 'public', 'bracket.jpg') };
 const themeOut = () => ({ btn: (db.theme && db.theme.btn) || '', v: (db.theme && db.theme.v) || 0 });
-app.get('/theme/:w(bg|logo)', (req, res) => {
+app.get('/theme/:w(bg|logo|bracket)', (req, res) => {
   const w = req.params.w, t = db.theme || {};
   res.set('Cache-Control', 'no-cache');
   if (t[w + 'Type'] && fs.existsSync(themeFile(w))) return res.type(t[w + 'Type']).sendFile(themeFile(w));
@@ -125,7 +126,7 @@ app.get('/theme/:w(bg|logo)', (req, res) => {
 });
 app.get('/api/theme', (req, res) => res.json(themeOut()));   // for the login screen (before signing in)
 const adminFromReq = req => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && isAdm(k) ? k : null; };
-app.post('/api/theme/:w(bg|logo)', express.raw({ type: 'image/*', limit: '8mb' }), (req, res) => {
+app.post('/api/theme/:w(bg|logo|bracket)', express.raw({ type: 'image/*', limit: '8mb' }), (req, res) => {
   if (!adminFromReq(req)) return res.sendStatus(403);
   const type = String(req.headers['content-type'] || '');
   if (!/^image\/(png|jpeg|webp|gif)$/.test(type) || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Use a PNG, JPG, WebP or GIF picture' });
@@ -133,7 +134,7 @@ app.post('/api/theme/:w(bg|logo)', express.raw({ type: 'image/*', limit: '8mb' }
   db.theme = db.theme || {}; db.theme[req.params.w + 'Type'] = type; db.theme.v = Date.now();
   console.log('[theme] admin changed the', req.params.w); save(); push(); res.json({ ok: true });
 });
-app.delete('/api/theme/:w(bg|logo)', (req, res) => {   // back to the original picture
+app.delete('/api/theme/:w(bg|logo|bracket)', (req, res) => {   // back to the original picture
   if (!adminFromReq(req)) return res.sendStatus(403);
   try { fs.unlinkSync(themeFile(req.params.w)); } catch {}
   db.theme = db.theme || {}; delete db.theme[req.params.w + 'Type']; db.theme.v = Date.now();
@@ -283,7 +284,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bracket: db.bracket || {}, theme: themeOut()
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bk: db.bk, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -354,6 +355,36 @@ function unreadFor(k) {
   return out;
 }
 const markRead = (k, id) => { const u = U(k), c = chan(id); if (u && c && can(k, c)) { (u.read || (u.read = {}))[c.id] = Date.now(); save(); } };
+
+// ---- Tournament bracket layout: boxes and straight lines on a 1600 x 900 canvas ----
+const num = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)));
+const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || '')) ? String(v) : d);
+function cleanBk(d) {
+  d = d || {};
+  const slots = (Array.isArray(d.slots) ? d.slots : []).slice(0, 64).map(s => {
+    const w = num(s.w, 60, 1600), h = num(s.h, 25, 900);
+    return { id: String(s.id || crypto.randomBytes(4).toString('hex')).slice(0, 12), x: num(s.x, 0, 1600 - w), y: num(s.y, 0, 900 - h), w, h,
+      shape: ['a', 'b', 'c', 'none'].includes(s.shape) ? s.shape : 'a', champ: !!s.champ, name: String(s.name || '').trim().slice(0, 40) };
+  });
+  const lines = (Array.isArray(d.lines) ? d.lines : []).slice(0, 200).map(l => ({
+    id: String(l.id || crypto.randomBytes(4).toString('hex')).slice(0, 12),
+    pts: (Array.isArray(l.pts) ? l.pts : []).slice(0, 60).map(p => [num(p && p[0], 0, 1600), num(p && p[1], 0, 900)])
+  })).filter(l => l.pts.length >= 2);
+  const c = d.colors || {};
+  const colors = { box: hex(c.box, '#e11d2e'), line: hex(c.line, '#ffffff'), text: hex(c.text, '#ffffff'), champ: hex(c.champ, '#ffd166'), lw: num(c.lw || 4, 1, 14) };
+  return { slots, lines, colors };
+}
+function migrateBracket() {   // one time: the old fixed bracket becomes an editable layout (same positions and names)
+  if (db.bk) return;
+  const OLD = { L1: [3.71, 44.10, 16.04, 5.31], L2: [3.71, 52.28, 16.04, 5.63], L3: [3.71, 61.42, 16.04, 5.74], L4: [3.71, 70.14, 16.04, 5.84],
+    SL: [26.63, 58.66, 11.97, 5.10], F: [42.22, 62.91, 15.57, 5.10], SR: [61.16, 58.66, 12.15, 5.10],
+    R1: [80.19, 44.10, 16.16, 5.31], R2: [80.19, 52.28, 16.16, 5.63], R3: [80.19, 61.42, 16.16, 5.74], R4: [80.19, 70.14, 16.16, 5.84] };
+  const names = db.bracket || {};
+  db.bk = cleanBk({ slots: Object.entries(OLD).map(([id, [x, y, w, h]]) => ({ id, x: x * 16, y: y * 9, w: w * 16, h: h * 9, shape: 'none', champ: id === 'F', name: names[id] || '' })), lines: [], colors: {} });
+  save();
+}
+
+const REACTS = '👍 ❤️ 😂 🤣 😮 😢 😡 🔥 💯 👏 🙏 🎉 ⚔️ 🛡️ 🏹 🪄 💀 🩸 ⚡ 🐉 🥷 👑 🏆 🎯 ✅ ❌ 👀 🫡'.split(' ');   // emoji allowed for reactions (same list as the picker in the page)
 
 function handle(w, m) {
   const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p);
@@ -461,6 +492,20 @@ function handle(w, m) {
       }
       done(); break;
     }
+    case 'react': {   // add/remove my reaction on a message (same emoji again = remove)
+      const c = chan(m.ch), e = String(m.e || '');
+      if (!can(k, c) || !REACTS.includes(e)) break;
+      const msg = (db.msgs[c.id] || []).find(x => (x.id || x.ts) === m.id);
+      if (!msg) break;
+      const re = msg.re || (msg.re = {}), who = re[e] || (re[e] = []);
+      const i = who.indexOf(k);
+      if (i >= 0) who.splice(i, 1); else { if (Object.keys(re).length >= 20 && !re[e].length) break; who.push(k); }
+      if (!who.length) delete re[e];
+      if (!Object.keys(re).length) delete msg.re;
+      save();
+      live().forEach(x => can(x.key, c) && send(x, { t: 'react', ch: c.id, id: m.id, re: msg.re || {} }));
+      break;
+    }
     case 'delmsg': {
       const c = chan(m.ch);
       if (!adm || !c) break;
@@ -475,15 +520,17 @@ function handle(w, m) {
       db.theme = db.theme || {}; if (c) db.theme.btn = c; else delete db.theme.btn;
       done(); break;
     }
-    case 'bracket': {   // tournament bracket: only the admin writes names into the slots; everyone sees them live
+    case 'bklayout': {   // admin: the whole bracket layout (boxes, lines, colours) from the editor
       if (!adm) break;
-      const SLOTS = ['L1', 'L2', 'L3', 'L4', 'R1', 'R2', 'R3', 'R4', 'SL', 'SR', 'F'];
-      db.bracket = db.bracket || {};
-      if (m.reset) db.bracket = {};
-      else if (SLOTS.includes(m.slot)) { const n = String(m.name || '').trim().slice(0, 40); if (n) db.bracket[m.slot] = n; else delete db.bracket[m.slot]; }
-      else break;
-      done(); break;
+      db.bk = cleanBk(m.data); done(); break;
     }
+    case 'bkname': {   // admin: team name in one box
+      if (!adm || !db.bk) break;
+      const sl = db.bk.slots.find(x => x.id === String(m.id));
+      if (sl) { sl.name = String(m.name || '').trim().slice(0, 40); done(); }
+      break;
+    }
+    case 'bkclear': if (adm && db.bk) { db.bk.slots.forEach(x => { x.name = ''; }); done(); } break;
     case 'clear': {
       const c = chan(m.ch);
       if (!adm || !c) break;
