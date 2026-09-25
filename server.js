@@ -111,6 +111,35 @@ const app = express();
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---- Appearance (admin): background picture, logo, and the colour of the main (red) buttons ----
+// Pictures are kept as files next to data.json (the persistent disk), not inside it, so saving chat stays fast.
+const THEME_DIR = process.env.DATA_DIR || __dirname;
+const themeFile = w => path.join(THEME_DIR, 'theme-' + w);
+const THEME_DEFAULT = { bg: path.join(__dirname, 'public', 'bg.jpg'), logo: path.join(__dirname, 'public', 'logo.png') };
+const themeOut = () => ({ btn: (db.theme && db.theme.btn) || '', v: (db.theme && db.theme.v) || 0 });
+app.get('/theme/:w(bg|logo)', (req, res) => {
+  const w = req.params.w, t = db.theme || {};
+  res.set('Cache-Control', 'no-cache');
+  if (t[w + 'Type'] && fs.existsSync(themeFile(w))) return res.type(t[w + 'Type']).sendFile(themeFile(w));
+  res.sendFile(THEME_DEFAULT[w]);
+});
+app.get('/api/theme', (req, res) => res.json(themeOut()));   // for the login screen (before signing in)
+const adminFromReq = req => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && isAdm(k) ? k : null; };
+app.post('/api/theme/:w(bg|logo)', express.raw({ type: 'image/*', limit: '8mb' }), (req, res) => {
+  if (!adminFromReq(req)) return res.sendStatus(403);
+  const type = String(req.headers['content-type'] || '');
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(type) || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Use a PNG, JPG, WebP or GIF picture' });
+  try { fs.writeFileSync(themeFile(req.params.w), req.body); } catch (e) { return res.status(500).json({ error: 'Could not save the picture' }); }
+  db.theme = db.theme || {}; db.theme[req.params.w + 'Type'] = type; db.theme.v = Date.now();
+  console.log('[theme] admin changed the', req.params.w); save(); push(); res.json({ ok: true });
+});
+app.delete('/api/theme/:w(bg|logo)', (req, res) => {   // back to the original picture
+  if (!adminFromReq(req)) return res.sendStatus(403);
+  try { fs.unlinkSync(themeFile(req.params.w)); } catch {}
+  db.theme = db.theme || {}; delete db.theme[req.params.w + 'Type']; db.theme.v = Date.now();
+  save(); push(); res.json({ ok: true });
+});
+
 app.get('/av/:k', (req, res) => {
   const u = U(req.params.k);
   if (!u || !u.avatar) return res.sendStatus(404);
@@ -254,7 +283,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bracket: db.bracket || {}
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bracket: db.bracket || {}, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -438,6 +467,13 @@ function handle(w, m) {
       db.msgs[c.id] = (db.msgs[c.id] || []).filter(x => (x.id || x.ts) !== m.id); save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'del', ch: c.id, id: m.id }));
       break;
+    }
+    case 'btncolor': {   // admin: colour of the main buttons (Login, Send, …); empty = back to the original red
+      if (!adm) break;
+      const c = String(m.color || '');
+      if (c && !/^#[0-9a-f]{6}$/i.test(c)) break;
+      db.theme = db.theme || {}; if (c) db.theme.btn = c; else delete db.theme.btn;
+      done(); break;
     }
     case 'bracket': {   // tournament bracket: only the admin writes names into the slots; everyone sees them live
       if (!adm) break;

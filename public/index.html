@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Hashira VRaid</title>
-<link rel="icon" href="/logo.png">
+<link rel="icon" id="favi" href="/theme/logo">
 <link rel="manifest" href="/app/manifest.json"><meta name="theme-color" content="#10070b"><link rel="apple-touch-icon" href="/app/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
 <style>
@@ -10,12 +10,12 @@
 [data-theme=light]{--tx:#1d0f13;--mut:#6b5a60;--pan:rgba(255,255,255,.82);--pan2:rgba(0,0,0,.06);--bd:rgba(0,0,0,.15);--ov:rgba(255,255,255,.7);--solid:#fff}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{font:15px/1.4 system-ui,sans-serif;color:var(--tx);background:linear-gradient(var(--ov),var(--ov)),url(/bg.jpg) center/cover fixed,#120608}
+body{font:15px/1.4 system-ui,sans-serif;color:var(--tx);background:linear-gradient(var(--ov),var(--ov)),url(/theme/bg) center/cover fixed,#120608}
 h1,h2,h3,.brand{font-family:Rajdhani,sans-serif}
 button,input,select{font:inherit;color:inherit}
 button{background:var(--pan2);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;cursor:pointer}
 button:hover{border-color:var(--red)}
-button.p{background:var(--red);border-color:var(--red);color:#fff}
+button.p{background:var(--btn,var(--red));border-color:var(--btn,var(--red));color:#fff}
 input,select{background:var(--pan2);border:1px solid var(--bd);border-radius:6px;padding:8px 10px;width:100%}
 select option{color:#000}
 input[type=checkbox]{width:auto}
@@ -75,6 +75,8 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .vc{display:grid;justify-items:center;gap:4px;width:96px;text-align:center;font-size:13px}
 .vc button{font-size:11px;padding:2px 6px}
 .help.ok{border-color:var(--bd)}
+.tprev{max-width:100%;max-height:140px;object-fit:contain;border-radius:8px;background:rgba(0,0,0,.3);display:block}
+input[type=color]{width:48px;height:36px;padding:2px;border-radius:6px;cursor:pointer}
 .lonly{align-self:center;font-size:13px;color:var(--mut);padding:0 6px}
 .lmrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .vol{display:flex;align-items:center;gap:6px;font-size:12px;width:100%}.vol input{flex:1;min-width:0;accent-color:var(--red);border:0;padding:0;margin:0;background:none;box-shadow:none;outline:0;height:auto}
@@ -99,6 +101,12 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .mrow.mg{cursor:pointer}.mrow:hover{background:var(--pan2)}
 .mrow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mrow.off{opacity:.5}
+ /* scrollbars that match the dark theme */
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px}::-webkit-scrollbar-thumb:hover{background:rgba(225,29,46,.55)}
+.sec{cursor:pointer;user-select:none}.sec>span:first-child::after{content:' ▾';font-size:10px;opacity:.7}.sec.fold>span:first-child::after{content:' ▸'}
+.m b.nm{font-weight:700}
 .grp{display:flex;align-items:center;gap:6px;padding:12px 6px 4px;color:var(--mut);font-size:13px;cursor:pointer;user-select:none}
 .grp:first-child{padding-top:2px}
 .grp i{width:8px;height:8px;border-radius:50%;flex:none}
@@ -150,7 +158,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 </style></head><body>
 
 <div id="login"><form class="card" onsubmit="event.preventDefault();auth('login')">
-  <img src="/logo.png" alt="Hashira Esports">
+  <img class="tlogo" src="/theme/logo" alt="Hashira Esports">
   <h1>Hashira VRaid</h1>
   <input id="u" placeholder="Username" autocomplete="username">
   <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
@@ -161,7 +169,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 <div id="app" class="hide">
   <div id="scrim"></div>
   <aside id="side">
-    <div class="hd"><img src="/logo.png" alt=""><span class="brand">Hashira VRaid</span></div>
+    <div class="hd"><img class="tlogo" src="/theme/logo" alt=""><span class="brand">Hashira VRaid</span></div>
     <div class="list" id="chl"></div>
     <div class="me" id="me"></div>
   </aside>
@@ -234,7 +242,7 @@ function on(m){
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
     showUnread();
-    render();syncPeers();
+    render();syncPeers();repaintNames();applyTheme(m.theme);
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
     reconcile();
@@ -272,10 +280,15 @@ function rolesOf(u){
   const r=(u.roles||[]).filter(id=>id!='default'&&S.roles[id]).sort((a,b)=>rRank(b)-rRank(a)||rName(a).localeCompare(rName(b)));
   return r.length?r:['default'];
 }
+// Name in chat = the person's CURRENT name, in the colour of their highest role (Default = normal text colour).
+function nameColor(u){const top=u?rolesOf(u)[0]:'default';return top=='default'?'':(S.roles[top]||{}).color||''}
+function paintName(nb){const u=S.users.find(x=>x.key==nb.dataset.k);nb.textContent=(u?u.name:nb.dataset.n)+' ';nb.style.color=nameColor(u)}
+function repaintNames(){document.querySelectorAll('#msgs b.nm').forEach(paintName)}   // names/roles changed: update old messages too
 function addMsg(m){
   const d=E('div','m');d.append(avEl(m.key,m.name));
   const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
-  const nb=E('b',0,(u?u.name:m.name)+' ');if(u)nb.oncontextmenu=e=>userMenu(e,u);h.append(nb);if(u)h.append(...rolesOf(u).map(tag),E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
+  const nb=E('b','nm');nb.dataset.k=m.key;nb.dataset.n=m.name;paintName(nb);nb.oncontextmenu=e=>{const x=S.users.find(y=>y.key==m.key);if(x)userMenu(e,x)};
+  h.append(nb,E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
   const mid=m.id||m.ts;d.dataset.id=mid;
   if(S.me.role=='admin'){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}
   b.append(h,E('p',0,m.text));d.append(b);
@@ -337,6 +350,41 @@ function drawBracket(){
   box.append(wrap);fitBracket();
   if(adm)box.append(E('small','bhint','Admin: click a slot to type a team name. Right-click a team to move them to the next round.'));
 }
+/* ---------- Appearance (set by the admin, same for everyone) ---------- */
+let themeV=null;
+function applyTheme(t){
+  if(!t)return;
+  if(t.btn)document.documentElement.style.setProperty('--btn',t.btn);else document.documentElement.style.removeProperty('--btn');
+  if(t.v!==themeV){
+    const first=themeV===null;themeV=t.v;if(first&&!t.v)return;   // nothing changed from the originals
+    const q='?v='+t.v;
+    document.body.style.backgroundImage=`linear-gradient(var(--ov),var(--ov)),url(/theme/bg${q})`;
+    document.querySelectorAll('img.tlogo').forEach(i=>i.src='/theme/logo'+q);$('#favi').href='/theme/logo'+q;
+  }
+}
+fetch('/api/theme').then(r=>r.json()).then(applyTheme).catch(()=>{});   // login screen too
+function appearance(){
+  const q='?v='+(themeV||0);
+  const pic=(w,label)=>{
+    const img=E('img','tprev');img.src='/theme/'+w+q;
+    const f=E('input');f.type='file';f.accept='image/png,image/jpeg,image/webp,image/gif';f.style.display='none';
+    const ch=E('button','p','Change '+label),rs=E('button',0,'Reset to original'),st=E('small');
+    ch.onclick=()=>f.click();
+    f.onchange=async()=>{const file=f.files[0];if(!file)return;if(file.size>8e6)return st.textContent='Picture is too big (max 8 MB)';
+      st.textContent='Uploading…';
+      const r=await fetch('/api/theme/'+w,{method:'POST',headers:{'Content-Type':file.type,Authorization:'Bearer '+tok},body:file}).catch(()=>null);
+      const j=r?await r.json().catch(()=>({})):{};st.textContent=r&&r.ok?'✓ Saved. Everyone sees it now.':(j.error||'Could not upload');if(r&&r.ok)setTimeout(appearance,400)};
+    rs.onclick=async()=>{if(!confirm('Go back to the original '+label+'?'))return;await fetch('/api/theme/'+w,{method:'DELETE',headers:{Authorization:'Bearer '+tok}}).catch(()=>{});setTimeout(appearance,400)};
+    const row=E('div','row');row.append(ch,rs);return [E('label',0,label[0].toUpperCase()+label.slice(1)),img,row,f,st];
+  };
+  const col=E('input');col.type='color';col.value=(S.theme&&S.theme.btn)||'#e11d2e';
+  const prev=E('button','p','Send');prev.style.pointerEvents='none';
+  col.oninput=()=>{document.documentElement.style.setProperty('--btn',col.value)};
+  col.onchange=()=>tx({t:'btncolor',color:col.value});
+  const cr=E('button',0,'Reset to original red');cr.onclick=()=>{tx({t:'btncolor',color:''});col.value='#e11d2e'};
+  const crow=E('div','row');crow.append(col,prev,cr);
+  modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
+}
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
 function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
@@ -360,7 +408,9 @@ function render(){
   [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
     const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
     if(cat.id&&!chs.length&&!P('channels'))return;
-    const s=E('div','sec');s.append(E('span',0,cat.name));
+    const ck=cat.id||'~main',folded=cfold.has(ck);
+    const s=E('div','sec'+(folded?' fold':''));s.append(E('span',0,cat.name));s.title='Click to collapse or expand';
+    s.onclick=e=>{if(e.target.closest('button'))return;folded?cfold.delete(ck):cfold.add(ck);try{localStorage.cfold=JSON.stringify([...cfold])}catch{};render()};
     if(P('channels')){
       const menu=e=>ctx(e,[cat.name,['Add channel here',()=>newCh(cat.id)],
         ...(cat.id?[['Rename category',()=>{const n=prompt('New category name',cat.name);if(n)tx({t:'renamecat',id:cat.id,name:n})}],
@@ -375,6 +425,7 @@ function render(){
     }
     L.append(s);
     chs.forEach(c=>{
+      if(folded&&!(cur&&cur.id==c.id)&&vc!=c.id)return;   // collapsed: keep only the open channel and the voice channel you are in (like Discord)
       const d=E('div','ch'+(cur&&cur.id==c.id?' on':''));
       d.append(E('span',0,(c.type=='voice'?'🔊 ':'# ')+c.name+(c.open?'':' 🔒')));
       const un=c.type=='text'&&!(cur&&cur.id==c.id)?unread[c.id]||0:0;
@@ -425,12 +476,12 @@ function render(){
   const seeGroup=g=>me.role=='admin'||ALWAYS.includes(g)||(g=='~banned'?staffView:mine.has(g));
   Object.keys(groups).filter(seeGroup).sort((a,b)=>a=='~banned'?1:b=='~banned'?-1:rank(b)-rank(a)||nameOf(a).localeCompare(nameOf(b))).forEach(g=>{
     const list=groups[g].sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name));
-    const h=E('div','grp'+(fold.has(g)?' fold':'')),dot=E('i');
+    const h=E('div','grp'+(unfold.has(g)?'':' fold')),dot=E('i');
     dot.style.background=g=='~banned'?'#777':(S.roles[g]||{color:'#777'}).color;
     h.append(dot,E('span',0,nameOf(g)),E('small',0,list.filter(u=>u.on).length+'/'+list.length));
-    h.title='Click to collapse or expand';h.onclick=()=>{fold.has(g)?fold.delete(g):fold.add(g);render()};
+    h.title='Click to collapse or expand';h.onclick=()=>{unfold.has(g)?unfold.delete(g):unfold.add(g);render()};
     M.append(h);
-    if(fold.has(g))return;
+    if(!unfold.has(g))return;
     list.forEach(u=>{
       const mg=manageable(u),r=E('div','mrow'+(u.on?'':' off')+(mg?' mg':''));
       r.append(avEl(u.key,u.name),E('span',0,u.name));
@@ -538,7 +589,9 @@ $('#file').onchange=e=>{
 $('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
 
 /* ---------- Drag and drop (channels, categories) ---------- */
-let drag=null;const fold=new Set();let managing=null;   // managing: the person whose role box is open, so it refreshes when roles change
+let drag=null;const unfold=new Set();   // member groups are collapsed until opened (every time the app starts)
+let cfold=new Set();try{cfold=new Set(JSON.parse(localStorage.cfold||'[]'))}catch{}   // collapsed channel categories (remembered)
+let managing=null;   // managing: the person whose role box is open, so it refreshes when roles change
 function dg(el,o){if(window.matchMedia&&matchMedia('(hover:none)').matches)return;el.draggable=true;el.ondragstart=e=>{drag=o;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x');e.stopPropagation()};el.ondragend=()=>{drag=null}}
 function dz(el,f,uf){   // f: reorder handler (channels/categories), uf: drop handler for a person being moved
   const low=e=>{const r=el.getBoundingClientRect();return e.clientY>=r.top+r.height/2};
@@ -610,6 +663,7 @@ function settings(){
     if(S.dl){const dw=E('button','p','Download Windows app');dw.onclick=()=>open(S.dl,'_blank');items.push(dw)}   // link set by the admin in Render (DESKTOP_APP_URL)
     const ia=E('button',S.dl?'':'p','Install desktop app');ia.onclick=installApp;items.push(ia);
   }
+  if(me.role=='admin'){const ap=E('button',0,'Appearance (background, logo, button colour)');ap.onclick=appearance;items.push(ap)}
   const cp=E('button',0,'Change password');cp.onclick=passModal;items.push(cp);
   const au=E('button',0,'Audio setup (microphone, speakers, connection test)');au.onclick=audioSetup;items.push(au);
   items.push(E('label',0,'Muted for me (only you stop hearing them)'));
