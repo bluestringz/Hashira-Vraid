@@ -38,6 +38,15 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .ch{display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer}
 .ch.unr>span:first-child{font-weight:700;color:var(--tx)}
 .mob.dot{position:relative}.mob.dot::after{content:'';position:absolute;top:4px;right:4px;width:9px;height:9px;border-radius:50%;background:var(--red)}
+.brkm{margin:6px 0 2px;font-weight:700}
+#bbox{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.brk{position:relative;width:100%;max-width:1400px;aspect-ratio:1671/941;background:url(/bracket.jpg) center/cover no-repeat;border-radius:10px;container-type:inline-size;flex:none}
+.bs{position:absolute;display:flex;align-items:center;justify-content:center;padding:0 1.6cqw;box-sizing:border-box;color:#fff;font-family:Rajdhani,system-ui,sans-serif;font-weight:700;font-size:1.9cqw;letter-spacing:.02em;text-transform:uppercase;text-shadow:0 0 6px #000,0 2px 3px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bs span{white-space:nowrap}
+.bs.champ{font-size:2.3cqw;color:#ffd166}
+.bs.empty span{opacity:.45;font-size:.75em;font-weight:500;text-transform:none;letter-spacing:0}
+.bs input{width:100%;height:80%;background:rgba(0,0,0,.75);border:1px solid var(--red);border-radius:4px;color:#fff;font:inherit;text-align:center;padding:0 4px;margin:0}
+.bhint{color:var(--mut)}
 .ch .badge{margin-left:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .ch:hover,.ch.on{background:var(--pan2)}.ch.on{border-left:3px solid var(--red)}
 .ch span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -161,6 +170,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
     <div id="msgs"></div>
     <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
+    <div id="bbox" class="hide"></div>
   </main>
   <aside id="mem"><div class="hd"><b class="brand">Members</b></div><div class="list" id="mlist"></div></aside>
 </div>
@@ -219,7 +229,7 @@ function on(m){
     const ns=S.me.sv||{};if(os){if(!!ns.m!=!!os.m)toast(ns.m?'A moderator muted you':'You can speak again');if(!!ns.d!=!!os.d)toast(ns.d?'A moderator deafened you':'You can hear again')}
     applyMic();syncAudio();
     $('#login').classList.add('hide');$('#app').classList.remove('hide');
-    const same=cur&&S.channels.find(c=>c.id==cur.id);
+    const same=cur&&(cur.type=='bracket'?cur:S.channels.find(c=>c.id==cur.id));
     if(same)cur=same;else pick((!cur&&desired&&S.channels.find(c=>c.id==desired))||S.channels[0],true);   // after a refresh, open the voice channel you were in
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
@@ -283,6 +293,52 @@ async function installApp(){
     E('small',0,'Android (Chrome): ⋮ menu > "Add to Home screen" or "Install app".'),
     E('small',0,'iPhone/iPad (Safari): Share button > "Add to Home Screen".'));
 }
+/* ---------- Tournament bracket ----------
+   The picture is the design; names sit on top of its slots. Only the admin can type names (click a slot).
+   Left 4 -> left finalist (SL), right 4 -> right finalist (SR), SL vs SR -> champion (F, under the crown). */
+const BRK={id:'~bracket',type:'bracket',name:'Tournament Bracket'};
+const BSLOT={L1:[3.71,44.10,16.04,5.31],L2:[3.71,52.28,16.04,5.63],L3:[3.71,61.42,16.04,5.74],L4:[3.71,70.14,16.04,5.84],
+  SL:[26.63,58.66,11.97,5.10],F:[42.19,63.76,15.56,6.16],SR:[61.16,58.66,12.15,5.10],
+  R1:[80.19,44.10,16.16,5.31],R2:[80.19,52.28,16.16,5.63],R3:[80.19,61.42,16.16,5.74],R4:[80.19,70.14,16.16,5.84]};
+const BNEXT={L1:'SL',L2:'SL',L3:'SL',L4:'SL',R1:'SR',R2:'SR',R3:'SR',R4:'SR',SL:'F',SR:'F'};
+const BLBL={SL:'Left finalist',SR:'Right finalist',F:'Champion'};
+let bEdit=null;
+function fitBracket(){   // long team names: shrink the text to fit the slot instead of cutting it off
+  document.querySelectorAll('#bbox .bs:not(.empty) span').forEach(t=>{
+    t.style.fontSize='';const box=t.parentElement,cs=getComputedStyle(box);
+    const room=box.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);let f=100;
+    while(t.getBoundingClientRect().width>room&&f>40){f-=4;t.style.fontSize=f+'%'}
+  });
+}
+addEventListener('resize',()=>{if(cur&&cur.type=='bracket')fitBracket()});
+document.fonts&&document.fonts.ready.then(()=>{if(cur&&cur.type=='bracket')fitBracket()});   // slot the admin is typing in (so live updates don't interrupt)
+function drawBracket(){
+  const box=$('#bbox'),adm=S.me.role=='admin',br=S.bracket||{};
+  if(bEdit&&box.querySelector('input'))return;   // keep the admin's typing
+  box.replaceChildren();
+  const wrap=E('div','brk');
+  Object.entries(BSLOT).forEach(([id,[x,y,w,h]])=>{
+    const s=E('div','bs'+(id=='F'?' champ':'')+(br[id]?'':' empty'));
+    s.style.cssText=`left:${x}%;top:${y}%;width:${w}%;height:${h}%`;
+    const t=E('span',0,br[id]||(adm?(BLBL[id]||'Click to add team'):''));s.append(t);
+    if(adm){
+      s.title='Click to type a team name'+(BNEXT[id]?' • right-click to move to the next round':'');
+      s.onclick=()=>{
+        if(s.querySelector('input'))return;
+        const i=E('input');i.maxLength=40;i.value=br[id]||'';i.placeholder='Team name';bEdit=id;
+        const save=()=>{if(bEdit!==id)return;bEdit=null;const v=i.value.trim();if(v!==(br[id]||''))tx({t:'bracket',slot:id,name:v});drawBracket()};
+        i.onkeydown=e=>{if(e.key=='Enter')i.blur();if(e.key=='Escape'){i.value=br[id]||'';i.blur()}};
+        i.onblur=save;s.replaceChildren(i);i.focus();i.select();
+      };
+      s.oncontextmenu=e=>ctx(e,[br[id]||'Empty slot',
+        ...(br[id]&&BNEXT[id]?[['Move to next round ('+(BLBL[BNEXT[id]]||'')+')',()=>tx({t:'bracket',slot:BNEXT[id],name:br[id]})]]:[]),
+        ...(br[id]?[['Clear this slot',()=>tx({t:'bracket',slot:id,name:''}),'dng']]:[])]);
+    }
+    wrap.append(s);
+  });
+  box.append(wrap);fitBracket();
+  if(adm)box.append(E('small','bhint','Admin: click a slot to type a team name. Right-click a team to move them to the next round.'));
+}
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
 function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
@@ -300,6 +356,9 @@ function render(){
   const addCat=()=>{const n=prompt('Category name');if(n)tx({t:'addcat',name:n})};
   const more=fn=>{const b=E('button','x more','⋯');b.title='More (or right-click)';b.onclick=e=>fn(e);return b};
   L.oncontextmenu=P('channels')?e=>ctx(e,['Channels',['Add channel',()=>newCh('')],['Add category',addCat]]):null;
+  { // Tournament bracket menu at the top of the list
+    const b=E('div','ch brkm'+(cur&&cur.type=='bracket'?' on':''));b.append(E('span',0,'🏆 Tournament Bracket'));b.onclick=()=>pick(BRK);L.append(b);
+  }
   [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
     const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
     if(cat.id&&!chs.length&&!P('channels'))return;
@@ -348,12 +407,13 @@ function render(){
   const lo=E('button',0,'⎋');lo.title='Log out';lo.onclick=()=>{want(null);delete localStorage.tk;location.reload()};
   r2.append(mic,hp,th,st,lo);f.append(r1,r2);
   // main
-  const txt=cur&&cur.type=='text';
-  $('#title').textContent=cur?(txt?'# ':'🔊 ')+cur.name:'';
+  const txt=cur&&cur.type=='text',brk=cur&&cur.type=='bracket';
+  $('#title').textContent=cur?(brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
   const ta=$('#topact');ta.replaceChildren();
   if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
-  $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!cur);
-  if(cur&&!txt)panel();
+  if(me.role=='admin'&&brk){const b=E('button',0,'Clear bracket');b.onclick=()=>confirm('Remove ALL names from the bracket?')&&tx({t:'bracket',reset:1});ta.append(b)}
+  $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!!brk||!cur);$('#bbox').classList.toggle('hide',!brk);
+  if(brk)drawBracket();else if(cur&&!txt)panel();
   // members, grouped by role (Admin first, Default last, Banned only visible to moderators)
   const M=$('#mlist');M.replaceChildren();
   const staffView=me.role=='admin'||P('kick');

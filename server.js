@@ -250,7 +250,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || ''
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bracket: db.bracket || {}
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -425,6 +425,15 @@ function handle(w, m) {
       db.msgs[c.id] = (db.msgs[c.id] || []).filter(x => (x.id || x.ts) !== m.id); save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'del', ch: c.id, id: m.id }));
       break;
+    }
+    case 'bracket': {   // tournament bracket: only the admin writes names into the slots; everyone sees them live
+      if (!adm) break;
+      const SLOTS = ['L1', 'L2', 'L3', 'L4', 'R1', 'R2', 'R3', 'R4', 'SL', 'SR', 'F'];
+      db.bracket = db.bracket || {};
+      if (m.reset) db.bracket = {};
+      else if (SLOTS.includes(m.slot)) { const n = String(m.name || '').trim().slice(0, 40); if (n) db.bracket[m.slot] = n; else delete db.bracket[m.slot]; }
+      else break;
+      done(); break;
     }
     case 'clear': {
       const c = chan(m.ch);
