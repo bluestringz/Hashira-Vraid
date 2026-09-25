@@ -443,6 +443,13 @@ const STAFF=['channels','kick','assign','roles','voicemod','disconnect','move'];
 const staffRole=id=>((S.roles[id]||{perms:[]}).perms||[]).some(x=>STAFF.includes(x));
 function tgtOk(u){return u.role!='admin'&&u.key!=S.me.key&&(S.me.role=='admin'||!(u.roles||[]).some(staffRole))}
 function kickOk(u){return tgtOk(u)&&!u.banned&&S.me.perms.includes('kick')}
+function nickOk(u){return tgtOk(u)&&(S.me.role=='admin'||S.me.perms.includes('nick'))}
+function nickModal(u){
+  const i=E('input');i.maxLength=20;i.value=u.name;const b=E('button','p','Save');
+  b.onclick=()=>{const v=i.value.trim();if(v&&v!==u.name)tx({t:'nick',key:u.key,name:v});close()};
+  i.onkeydown=e=>{if(e.key=='Enter')b.click()};
+  modal('Change nickname',E('small',0,'Login name: '+u.key+' (does not change)'),i,E('small',0,'3-20 letters, numbers, spaces, . _ -'),b);setTimeout(()=>{i.focus();i.select()},50);
+}
 function canAssign(u){return tgtOk(u)&&!u.banned&&(S.me.role=='admin'||S.me.perms.includes('assign'))}
 function assignable(){return Object.entries(S.roles).filter(([i])=>i!='admin'&&i!='default'&&(S.me.role=='admin'||!staffRole(i)))}
 function manageable(u){return u.role!='admin'&&u.key!=S.me.key&&(u.banned?S.me.role=='admin':canAssign(u)||kickOk(u)||voiceItems(u).length>0)}
@@ -503,7 +510,7 @@ function manage(u){
   voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
   modal(u.name,...n);managing={k:u.key,sig:JSON.stringify([u.roles,u.banned])};
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",private:'See private voice and text channels'};
 function roleRow(id,r){
   const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
@@ -701,6 +708,7 @@ function userMenu(e,u){
     if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})],null,['Delete account',()=>delUser(u),'dng']);
   }else{
     it.push('User volume (only for you)',volSlider(u.key),[lmute.has(u.key)?'Unmute for me':'Mute for me',()=>toggleLM(u.key)]);
+    if(nickOk(u))it.push(null,['Change nickname…',()=>nickModal(u)]);
     if(canAssign(u))it.push(null,['Manage roles…',()=>manage(u)]);
     if(kickOk(u))it.push(null,['Kick',()=>tx({t:'kick',key:u.key}),'dng'],['Ban',()=>confirm('Ban '+u.name+'?')&&tx({t:'ban',key:u.key}),'dng']);
     if(me.role=='admin'&&u.role!='admin')it.push(['Delete account',()=>delUser(u),'dng']);

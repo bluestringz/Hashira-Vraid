@@ -3,7 +3,7 @@ const crypto = require('crypto'), fs = require('fs'), path = require('path');
 const { Pool } = require('pg');
 
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
-const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
+const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
@@ -11,7 +11,7 @@ let db = {
   roles: {
     default: { name: 'Default', color: '#8a8a94', perms: [] },
     verified: { name: 'Verified', color: '#2f9e6b', perms: ['private'] },
-    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move'] }
+    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick'] }
   },
   cats: [{ id: 'text', name: 'Text Channels' }, { id: 'voice', name: 'Voice Channels' }],
   channels: [
@@ -79,6 +79,10 @@ function seedAdmin() {
   if (!db.mig1) {   // one time: existing Senior role gets the new "move members" permission
     if (db.roles.senior && !db.roles.senior.perms.includes('move')) db.roles.senior.perms.push('move');
     db.mig1 = 1;
+  }
+  if (!db.mig2) {   // one time: existing Senior role gets the new "change members' nicknames" permission
+    if (db.roles.senior && !db.roles.senior.perms.includes('nick')) db.roles.senior.perms.push('nick');
+    db.mig2 = 1;
   }
   // Users used to have one `role`; now they have a list of extra roles (Default is implicit for everyone).
   for (const u of Object.values(db.users)) {
@@ -353,6 +357,15 @@ function handle(w, m) {
       w.cam = typeof m.cam === 'string' ? m.cam.slice(0, 80) : null;   // ids of the camera / screen-share streams, so others know which video is which
       w.scr = typeof m.scr === 'string' ? m.scr.slice(0, 80) : null;
       push(); break;
+    case 'nick': {   // admin / Senior (anyone with the "nick" permission): change another member's display name
+      const t = String(m.key || '');
+      if (!(adm || P(k).includes('nick')) || !okTarget(t)) break;
+      const name = String(m.name || '').trim().replace(/\s+/g, ' '), l = name.toLowerCase();
+      if (!/^[\w .-]{3,20}$/.test(name)) return send(w, { t: 'error', msg: 'Name: 3-20 letters, numbers, spaces, . _ -' });
+      if (Object.entries(db.users).some(([key, x]) => key !== t && (key === l || x.name.toLowerCase() === l))) return send(w, { t: 'error', msg: 'That name is already taken' });
+      console.log('[nick]', k, 'renamed', t, 'from', U(t).name, 'to', name);
+      U(t).name = name; done(); break;
+    }
     case 'setname': {
       const name = String(m.name || '').trim().replace(/\s+/g, ' '), l = name.toLowerCase();
       if (!/^[\w .-]{3,20}$/.test(name)) return send(w, { t: 'error', msg: 'Name: 3-20 letters, numbers, spaces, . _ -' });
