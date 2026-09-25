@@ -419,7 +419,10 @@ function render(){
   const nameOf=id=>id=='~banned'?'Banned':(S.roles[id]?S.roles[id].name:id);
   const groups={};
   S.users.forEach(u=>{if(u.banned&&!staffView)return;(u.banned?['~banned']:rolesOf(u)).forEach(g=>(groups[g]=groups[g]||[]).push(u))});   // listed under every role they have
-  Object.keys(groups).sort((a,b)=>a=='~banned'?1:b=='~banned'?-1:rank(b)-rank(a)||nameOf(a).localeCompare(nameOf(b))).forEach(g=>{
+  // Like the channels: you only see the role groups you belong to (the admin sees every group).
+  const mine=new Set(rolesOf({role:me.role,roles:me.roles}));
+  const seeGroup=g=>me.role=='admin'||(g=='~banned'?staffView:mine.has(g));
+  Object.keys(groups).filter(seeGroup).sort((a,b)=>a=='~banned'?1:b=='~banned'?-1:rank(b)-rank(a)||nameOf(a).localeCompare(nameOf(b))).forEach(g=>{
     const list=groups[g].sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name));
     const h=E('div','grp'+(fold.has(g)?' fold':'')),dot=E('i');
     dot.style.background=g=='~banned'?'#777':(S.roles[g]||{color:'#777'}).color;
