@@ -79,6 +79,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #send{align-items:flex-end}.m small{color:var(--mut)}
 .m .del,.m .rbtn{opacity:0}.m:hover .rbtn{opacity:1}
 .rbtn{font-size:12px;padding:0 5px;line-height:18px}
+.lnk{color:#6cb6ff;text-decoration:underline;word-break:break-all}.lnk:hover{color:#9fd0ff}
 .ment{color:#8ab4ff;background:rgba(88,101,242,.18);border-radius:4px;padding:0 2px;font-weight:600}.ment.ment-me{color:#ffd166;background:rgba(255,209,102,.18)}
 .m.mentioned{background:rgba(255,209,102,.08);border-left:3px solid #ffd166;padding-left:6px;border-radius:4px}
 .m.flash{animation:mflash 2s}@keyframes mflash{0%,40%{background:rgba(255,209,102,.35)}}
@@ -339,15 +340,25 @@ function emojiPop(anchor,pick){
 }
 /* ---------- @mentions ---------- */
 let notifs=[],jumpId=null;
-function msgText(t){   // show @Name in the mention colour (plain text otherwise, never HTML)
-  const p=E('p');const names=S.users.map(u=>u.name).sort((a,b)=>b.length-a.length);
+function msgText(t){   // links become clickable, @Name / @everyone are coloured; everything else stays plain text (never HTML)
+  const p=E('p');const URL_RE=/\b(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+\.[^\s<>"']+)/gi;let last=0,m;
+  while((m=URL_RE.exec(t))){
+    let url=m[0].replace(/[.,!?;:)\]]+$/,'');   // don't swallow the full stop / bracket after a link
+    mentionsTo(p,t.slice(last,m.index));
+    const a=E('a','lnk',url);a.href=/^www\./i.test(url)?'https://'+url:url;a.target='_blank';a.rel='noopener noreferrer';p.append(a);
+    last=m.index+url.length;URL_RE.lastIndex=last;
+  }
+  mentionsTo(p,t.slice(last));return p;
+}
+function mentionsTo(p,t){
+  const names=S.users.map(u=>u.name).sort((a,b)=>b.length-a.length),myName=(S.users.find(u=>u.key==S.me.key)||{}).name;
   const low=t.toLowerCase();let i=0,last=0;
   while((i=low.indexOf('@',i))>=0){
     if(low.startsWith('@everyone',i)&&!/[a-z0-9_]/i.test(low[i+9]||' ')){p.append(t.slice(last,i),E('span','ment ment-me','@everyone'));i+=9;last=i;continue}
     const n=names.find(n=>low.startsWith('@'+n.toLowerCase(),i)&&!/[a-z0-9_]/i.test(low[i+n.length+1]||' '));
-    if(n){p.append(t.slice(last,i));const s=E('span','ment'+(n==(S.users.find(u=>u.key==S.me.key)||{}).name?' ment-me':''),t.slice(i,i+n.length+1));p.append(s);i+=n.length+1;last=i}else i++;
+    if(n){p.append(t.slice(last,i),E('span','ment'+(n==myName?' ment-me':''),t.slice(i,i+n.length+1)));i+=n.length+1;last=i}else i++;
   }
-  p.append(t.slice(last));return p;
+  p.append(t.slice(last));
 }
 function drawBell(){const b=$('#bell');if(!b)return;const n=notifs.filter(x=>!x.read).length;b.dataset.n=n>99?'99+':n||'';b.classList.toggle('has',n>0);showUnread()}
 function notifPanel(refresh){

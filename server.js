@@ -424,7 +424,7 @@ function handle(w, m) {
     case 'open': { const c = chan(m.ch); if (can(k, c)) { markRead(k, c.id); send(w, { t: 'history', ch: c.id, msgs: db.msgs[c.id] || [] }); } break; }
     case 'read': markRead(k, m.ch); break;   // saw new messages while the channel was open
     case 'chat': {
-      const c = chan(m.ch), text = String(m.text || '').trim().slice(0, 500);
+      const c = chan(m.ch), text = String(m.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
       if (!can(k, c) || !text) break;
       const msg = { id: crypto.randomBytes(4).toString('hex'), key: k, name: u.name, text, ts: Date.now() };
       let men = mentionsIn(text, k, c);
@@ -553,8 +553,11 @@ function handle(w, m) {
     }
     case 'delmsg': {
       const c = chan(m.ch);
-      if (!adm || !c) break;
-      db.msgs[c.id] = (db.msgs[c.id] || []).filter(x => (x.id || x.ts) !== m.id); save();
+      if (!c || !can(k, c)) break;
+      const target = (db.msgs[c.id] || []).find(x => (x.id || x.ts) === m.id);
+      if (!target) return send(w, { t: 'error', msg: 'That message was already deleted.' });
+      if (!(adm || target.key === k)) return send(w, { t: 'error', msg: 'You can only delete your own messages.' });   // the admin can delete any message
+      db.msgs[c.id] = db.msgs[c.id].filter(x => x !== target); save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'del', ch: c.id, id: m.id }));
       break;
     }
