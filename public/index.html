@@ -355,6 +355,7 @@ const BRK={id:'~bracket',type:'bracket',name:'Tournament Bracket'};
 const BW=1600,BH=900,BGRID=5;
 const BSHAPES={a:'Slant ↗',b:'Slant ↖',c:'Center',none:'Text only'};
 let bkEdit=false,bkLocal=null,bkSel=null,bkPen=null,bkPick=null,bkBusy=false,bkTimer=null,bkNameEdit=null;
+const bkCan=()=>S.me.role=='admin'||S.me.perms.includes('bracket');   // admin, or a role with the bracket permission (Senior)
 const bkDef=()=>({slots:[],lines:[],colors:{}});
 const bkData=()=>bkLocal||S.bk||bkDef();
 const bkCol=()=>Object.assign({box:'#e11d2e',line:'#ffffff',text:'#ffffff',champ:'#ffd166',lw:4},bkData().colors||{});
@@ -387,10 +388,14 @@ function bkOrtho(prev,x,y){   // pen: only straight across or straight up/down f
   return Math.abs(x-prev[0])>=Math.abs(y-prev[1])?[x,prev[1]]:[prev[0],y];
 }
 function drawBracket(){
-  const box=$('#bbox'),adm=S.me.role=='admin',d=bkData(),c=bkCol();
+  const box=$('#bbox'),adm=bkCan(),d=bkData(),c=bkCol();
   if(bkBusy||bkNameEdit&&box.querySelector('.bk2s input'))return;   // don't redraw under a drag or while typing
-  box.replaceChildren();
-  if(adm&&bkEdit)box.append(bkToolbar());
+  // Keep the editor toolbar on screen while redrawing, so an open colour picker stays open while you drag in it
+  let tb=box.querySelector('.bktool');
+  if(!(adm&&bkEdit)){box.replaceChildren();tb=null}
+  else if(!tb){box.replaceChildren();tb=bkToolbar();box.append(tb)}
+  else [...box.children].forEach(ch=>{if(ch!==tb)ch.remove()});
+  if(tb){const pb=tb.querySelector('.bkpenb');pb.textContent=bkPen?'✓ Finish drawing':'✎ Add line';pb.classList.toggle('on',!!bkPen)}
   const cv=E('div','bk2'+(bkEdit?' edit':'')+(bkPen?' pen':''));
   cv.style.backgroundImage=`url(/theme/bracket?v=${(S.theme&&S.theme.v)||0})`;
   // lines
@@ -499,10 +504,13 @@ function bkToolbar(){
   const add=E('button','p','+ Add bracket');
   const sel=E('select');Object.entries(BSHAPES).forEach(([k,n])=>{const o=E('option',0,n);o.value=k;sel.append(o)});sel.onchange=()=>shape=sel.value;
   add.onclick=()=>{const n={id:bkId(),x:720,y:420,w:260,h:55,shape,champ:shape=='c',name:''};bkLocal.slots.push(n);bkSel={type:'slot',id:n.id};bkPen=null;bkSave();drawBracket()};
-  const pen=E('button',bkPen?'on':'',bkPen?'✓ Finish drawing':'✎ Add line');
+  const pen=E('button','bkpenb','✎ Add line');
   pen.onclick=()=>{if(bkPen){bkFinishLine();bkPen=null}else{bkPen={pts:[]};bkSel=null}drawBracket()};
-  const colr=(label,key)=>{const w=E('label','bkc');const i=E('input');i.type='color';i.value=c[key];i.oninput=()=>{bkLocal.colors=Object.assign({},bkLocal.colors,{[key]:i.value});bkSave();drawBracket()};w.append(i,E('span',0,label));return w};
-  const lw=E('label','bkc');const lwi=E('input');lwi.type='range';lwi.min=1;lwi.max=14;lwi.value=c.lw;lwi.onchange=()=>{bkLocal.colors=Object.assign({},bkLocal.colors,{lw:+lwi.value});bkSave();drawBracket()};lw.append(E('span',0,'Line thickness'),lwi);
+  const colr=(label,key)=>{const w=E('label','bkc');const i=E('input');i.type='color';i.value=c[key];
+    i.oninput=()=>{bkLocal.colors=Object.assign({},bkLocal.colors,{[key]:i.value});drawBracket()};   // live preview while you drag in the picker
+    i.onchange=()=>bkSave();   // saved when you let go / close the picker
+    w.append(i,E('span',0,label));return w};
+  const lw=E('label','bkc');const lwi=E('input');lwi.type='range';lwi.min=1;lwi.max=14;lwi.value=c.lw;lwi.oninput=()=>{bkLocal.colors=Object.assign({},bkLocal.colors,{lw:+lwi.value});drawBracket()};lwi.onchange=()=>bkSave();lw.append(E('span',0,'Line thickness'),lwi);
   const bg=E('button',0,'Background…');bg.onclick=bkBackground;
   const done=E('button','p','Done');done.onclick=()=>{clearTimeout(bkTimer);if(bkLocal)tx({t:'bklayout',data:bkLocal});bkEdit=false;bkLocal=null;bkSel=null;bkPen=null;render()};
   t.append(sel,add,pen,colr('Bracket','box'),colr('Lines','line'),colr('Names','text'),colr('Champion','champ'),lw,bg,done);
@@ -639,7 +647,7 @@ function render(){
   $('#title').textContent=cur?(brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
   const ta=$('#topact');ta.replaceChildren();
   if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
-  if(me.role=='admin'&&brk&&!bkEdit){
+  if(bkCan()&&brk&&!bkEdit){
     const cl=E('button',0,'Clear names');cl.onclick=()=>confirm('Remove ALL team names from the bracket?')&&tx({t:'bkclear'});
     const ed=E('button','p','Edit layout');ed.onclick=()=>{bkEdit=true;bkLocal=JSON.parse(JSON.stringify(S.bk||bkDef()));bkSel=null;bkPen=null;render()};
     ta.append(cl,ed);
@@ -744,7 +752,7 @@ function manage(u){
   voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
   modal(u.name,...n);managing={k:u.key,sig:JSON.stringify([u.roles,u.banned])};
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",bracket:'Edit the tournament bracket (names, layout, colours, background)',private:'See private voice and text channels'};
 function roleRow(id,r){
   const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');

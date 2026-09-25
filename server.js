@@ -3,7 +3,7 @@ const crypto = require('crypto'), fs = require('fs'), path = require('path');
 const { Pool } = require('pg');
 
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
-const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick'];
+const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
@@ -11,7 +11,7 @@ let db = {
   roles: {
     default: { name: 'Default', color: '#8a8a94', perms: [] },
     verified: { name: 'Verified', color: '#2f9e6b', perms: ['private'] },
-    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick'] }
+    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick', 'bracket'] }
   },
   cats: [{ id: 'text', name: 'Text Channels' }, { id: 'voice', name: 'Voice Channels' }],
   channels: [
@@ -80,6 +80,10 @@ function seedAdmin() {
     if (db.roles.senior && !db.roles.senior.perms.includes('move')) db.roles.senior.perms.push('move');
     db.mig1 = 1;
   }
+  if (!db.mig3) {   // one time: existing Senior role can edit the tournament bracket
+    if (db.roles.senior && !db.roles.senior.perms.includes('bracket')) db.roles.senior.perms.push('bracket');
+    db.mig3 = 1;
+  }
   if (!db.mig2) {   // one time: existing Senior role gets the new "change members' nicknames" permission
     if (db.roles.senior && !db.roles.senior.perms.includes('nick')) db.roles.senior.perms.push('nick');
     db.mig2 = 1;
@@ -125,9 +129,9 @@ app.get('/theme/:w(bg|logo|bracket)', (req, res) => {
   res.sendFile(THEME_DEFAULT[w]);
 });
 app.get('/api/theme', (req, res) => res.json(themeOut()));   // for the login screen (before signing in)
-const adminFromReq = req => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && isAdm(k) ? k : null; };
+const adminFromReq = (req, w) => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && U(k) && (isAdm(k) || (w === 'bracket' && P(k).includes('bracket'))) ? k : null; };   // the bracket picture: also people with the bracket permission
 app.post('/api/theme/:w(bg|logo|bracket)', express.raw({ type: 'image/*', limit: '8mb' }), (req, res) => {
-  if (!adminFromReq(req)) return res.sendStatus(403);
+  if (!adminFromReq(req, req.params.w)) return res.sendStatus(403);
   const type = String(req.headers['content-type'] || '');
   if (!/^image\/(png|jpeg|webp|gif)$/.test(type) || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Use a PNG, JPG, WebP or GIF picture' });
   try { fs.writeFileSync(themeFile(req.params.w), req.body); } catch (e) { return res.status(500).json({ error: 'Could not save the picture' }); }
@@ -135,7 +139,7 @@ app.post('/api/theme/:w(bg|logo|bracket)', express.raw({ type: 'image/*', limit:
   console.log('[theme] admin changed the', req.params.w); save(); push(); res.json({ ok: true });
 });
 app.delete('/api/theme/:w(bg|logo|bracket)', (req, res) => {   // back to the original picture
-  if (!adminFromReq(req)) return res.sendStatus(403);
+  if (!adminFromReq(req, req.params.w)) return res.sendStatus(403);
   try { fs.unlinkSync(themeFile(req.params.w)); } catch {}
   db.theme = db.theme || {}; delete db.theme[req.params.w + 'Type']; db.theme.v = Date.now();
   save(); push(); res.json({ ok: true });
@@ -387,7 +391,7 @@ function migrateBracket() {   // one time: the old fixed bracket becomes an edit
 const REACTS = '👍 ❤️ 😂 🤣 😮 😢 😡 🔥 💯 👏 🙏 🎉 ⚔️ 🛡️ 🏹 🪄 💀 🩸 ⚡ 🐉 🥷 👑 🏆 🎯 ✅ ❌ 👀 🫡'.split(' ');   // emoji allowed for reactions (same list as the picker in the page)
 
 function handle(w, m) {
-  const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p);
+  const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p), canBk = adm || has('bracket');
   const okTarget = t => t && t !== k && U(t) && !isAdm(t) && (adm || !P(t).some(p => STAFF.includes(p)));
   const done = () => { save(); push(); };
   switch (m.t) {
@@ -521,16 +525,16 @@ function handle(w, m) {
       done(); break;
     }
     case 'bklayout': {   // admin: the whole bracket layout (boxes, lines, colours) from the editor
-      if (!adm) break;
+      if (!canBk) break;
       db.bk = cleanBk(m.data); done(); break;
     }
     case 'bkname': {   // admin: team name in one box
-      if (!adm || !db.bk) break;
+      if (!canBk || !db.bk) break;
       const sl = db.bk.slots.find(x => x.id === String(m.id));
       if (sl) { sl.name = String(m.name || '').trim().slice(0, 40); done(); }
       break;
     }
-    case 'bkclear': if (adm && db.bk) { db.bk.slots.forEach(x => { x.name = ''; }); done(); } break;
+    case 'bkclear': if (canBk && db.bk) { db.bk.slots.forEach(x => { x.name = ''; }); done(); } break;
     case 'clear': {
       const c = chan(m.ch);
       if (!adm || !c) break;
