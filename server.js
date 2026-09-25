@@ -288,7 +288,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {} },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bk: db.bk, theme: themeOut()
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -378,6 +378,8 @@ function cleanBk(d) {
   const colors = { box: hex(c.box, '#e11d2e'), line: hex(c.line, '#ffffff'), text: hex(c.text, '#ffffff'), champ: hex(c.champ, '#ffd166'), lw: num(c.lw || 4, 1, 14) };
   return { slots, lines, colors };
 }
+// Who sees the tournament bracket: Verified members, plus the admin and anyone who can edit it (Senior).
+const seeBk = k => isAdm(k) || P(k).includes('bracket') || eff(k).includes('verified');
 function migrateBracket() {   // one time: the old fixed bracket becomes an editable layout (same positions and names)
   if (db.bk) return;
   const OLD = { L1: [3.71, 44.10, 16.04, 5.31], L2: [3.71, 52.28, 16.04, 5.63], L3: [3.71, 61.42, 16.04, 5.74], L4: [3.71, 70.14, 16.04, 5.84],

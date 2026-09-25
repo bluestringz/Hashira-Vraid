@@ -254,7 +254,7 @@ function on(m){
     const ns=S.me.sv||{};if(os){if(!!ns.m!=!!os.m)toast(ns.m?'A moderator muted you':'You can speak again');if(!!ns.d!=!!os.d)toast(ns.d?'A moderator deafened you':'You can hear again')}
     applyMic();syncAudio();
     $('#login').classList.add('hide');$('#app').classList.remove('hide');
-    const same=cur&&(cur.type=='bracket'?cur:S.channels.find(c=>c.id==cur.id));
+    const same=cur&&(cur.type=='bracket'?((cur.edit?bkCan():!!S.bk)?cur:null):S.channels.find(c=>c.id==cur.id));   // lost access to a bracket page: go to a channel
     if(same)cur=same;else pick((!cur&&desired&&S.channels.find(c=>c.id==desired))||S.channels[0],true);   // after a refresh, open the voice channel you were in
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
@@ -351,7 +351,8 @@ async function installApp(){
    - "Edit layout": add boxes (3 shapes, or text only), drag and resize them, draw straight lines
      (only across or up/down, like a pen tool that never curves), pick colours, change the background.
    Positions are in a 1600 x 900 canvas, so it looks the same on every screen size. */
-const BRK={id:'~bracket',type:'bracket',name:'Tournament Bracket'};
+const BRK={id:'~bracket',type:'bracket',name:'Tournament Bracket'};              // display: everyone Verified, view only
+const BRKE={id:'~bkedit',type:'bracket',edit:true,name:'Bracket Editor'};       // creation: Admin and Senior only
 const BW=1600,BH=900,BGRID=5;
 const BSHAPES={a:'Slant ↗',b:'Slant ↖',c:'Center',none:'Text only'};
 let bkEdit=false,bkLocal=null,bkSel=null,bkPen=null,bkPick=null,bkBusy=false,bkTimer=null,bkNameEdit=null;
@@ -388,7 +389,7 @@ function bkOrtho(prev,x,y){   // pen: only straight across or straight up/down f
   return Math.abs(x-prev[0])>=Math.abs(y-prev[1])?[x,prev[1]]:[prev[0],y];
 }
 function drawBracket(){
-  const box=$('#bbox'),adm=bkCan(),d=bkData(),c=bkCol();
+  const box=$('#bbox'),adm=bkCan()&&!!(cur&&cur.edit),d=bkData(),c=bkCol();   // the display page is view-only for everyone
   if(bkBusy||bkNameEdit&&box.querySelector('.bk2s input'))return;   // don't redraw under a drag or while typing
   // Keep the editor toolbar on screen while redrawing, so an open colour picker stays open while you drag in it
   let tb=box.querySelector('.bktool');
@@ -578,6 +579,7 @@ document.addEventListener('visibilitychange',()=>{   // came back to the tab: th
   if(!document.hidden&&cur&&unread[cur.id]){delete unread[cur.id];tx({t:'read',ch:cur.id});showUnread()}
 });
 function pick(c,quiet){
+  if(bkEdit&&(!c||c.id!=BRKE.id)){clearTimeout(bkTimer);if(bkLocal)tx({t:'bklayout',data:bkLocal});bkEdit=false;bkLocal=null;bkSel=null;bkPen=null}   // left the editor mid-edit: keep the changes
   cur=c;if(!c)return;
   if(c.type=='text'){tx({t:'open',ch:c.id});delete unread[c.id];showUnread()}
   if(!quiet){closeDrawers();render()}
@@ -590,7 +592,8 @@ function render(){
   const more=fn=>{const b=E('button','x more','⋯');b.title='More (or right-click)';b.onclick=e=>fn(e);return b};
   L.oncontextmenu=P('channels')?e=>ctx(e,['Channels',['Add channel',()=>newCh('')],['Add category',addCat]]):null;
   { // Tournament bracket menu at the top of the list
-    const b=E('div','ch brkm'+(cur&&cur.type=='bracket'?' on':''));b.append(E('span',0,'🏆 Tournament Bracket'));b.onclick=()=>pick(BRK);L.append(b);
+    if(S.bk){const b=E('div','ch brkm'+(cur&&cur.id==BRK.id?' on':''));b.append(E('span',0,'🏆 Tournament Bracket'));b.onclick=()=>pick(BRK);L.append(b)}
+    if(bkCan()){const b=E('div','ch brkm'+(cur&&cur.id==BRKE.id?' on':''));b.append(E('span',0,'🛠 Bracket Editor'));b.title='Only Admin and Senior see this';b.onclick=()=>pick(BRKE);L.append(b)}
   }
   [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
     const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
@@ -647,7 +650,7 @@ function render(){
   $('#title').textContent=cur?(brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
   const ta=$('#topact');ta.replaceChildren();
   if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
-  if(bkCan()&&brk&&!bkEdit){
+  if(bkCan()&&brk&&cur.edit&&!bkEdit){
     const cl=E('button',0,'Clear names');cl.onclick=()=>confirm('Remove ALL team names from the bracket?')&&tx({t:'bkclear'});
     const ed=E('button','p','Edit layout');ed.onclick=()=>{bkEdit=true;bkLocal=JSON.parse(JSON.stringify(S.bk||bkDef()));bkSel=null;bkPen=null;render()};
     ta.append(cl,ed);
