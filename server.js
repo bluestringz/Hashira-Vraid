@@ -3,7 +3,7 @@ const crypto = require('crypto'), fs = require('fs'), path = require('path');
 const { Pool } = require('pg');
 
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
-const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket'];
+const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
@@ -11,7 +11,7 @@ let db = {
   roles: {
     default: { name: 'Default', color: '#8a8a94', perms: [] },
     verified: { name: 'Verified', color: '#2f9e6b', perms: ['private'] },
-    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick', 'bracket'] }
+    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick', 'bracket', 'everyone'] }
   },
   cats: [{ id: 'text', name: 'Text Channels' }, { id: 'voice', name: 'Voice Channels' }],
   channels: [
@@ -79,6 +79,10 @@ function seedAdmin() {
   if (!db.mig1) {   // one time: existing Senior role gets the new "move members" permission
     if (db.roles.senior && !db.roles.senior.perms.includes('move')) db.roles.senior.perms.push('move');
     db.mig1 = 1;
+  }
+  if (!db.mig4) {   // one time: existing Senior role can use @everyone
+    if (db.roles.senior && !db.roles.senior.perms.includes('everyone')) db.roles.senior.perms.push('everyone');
+    db.mig4 = 1;
   }
   if (!db.mig3) {   // one time: existing Senior role can edit the tournament bracket
     if (db.roles.senior && !db.roles.senior.perms.includes('bracket')) db.roles.senior.perms.push('bracket');
@@ -423,11 +427,13 @@ function handle(w, m) {
       const c = chan(m.ch), text = String(m.text || '').trim().slice(0, 500);
       if (!can(k, c) || !text) break;
       const msg = { id: crypto.randomBytes(4).toString('hex'), key: k, name: u.name, text, ts: Date.now() };
-      const men = mentionsIn(text, k, c);
-      if (men.length) msg.men = men;
+      let men = mentionsIn(text, k, c);
+      const all = /(^|\s)@everyone(?![a-z0-9_])/i.test(text) && (adm || has('everyone'));   // @everyone: admin / Senior (the "everyone" permission)
+      if (all) { msg.all = true; men = Object.keys(db.users).filter(x => x !== k && !db.banned[x] && can(x, c)); }
+      else if (men.length) msg.men = men;
       db.msgs[c.id] = (db.msgs[c.id] || []).concat(msg).slice(-100);
       men.forEach(t => {   // @mention: a notification for that person (kept until they read it, even if offline)
-        const n = { id: crypto.randomBytes(4).toString('hex'), ch: c.id, chName: c.name, msg: msg.id, from: k, fromName: u.name, text: text.slice(0, 140), ts: msg.ts, read: false };
+        const n = { id: crypto.randomBytes(4).toString('hex'), ch: c.id, chName: c.name, msg: msg.id, from: k, fromName: u.name, text: text.slice(0, 140), ts: msg.ts, read: false, all: all || undefined };
         const tu = U(t); tu.notifs = [n, ...(tu.notifs || [])].slice(0, 50);
         live().filter(x => x.key === t).forEach(x => send(x, { t: 'notif', n }));
       });

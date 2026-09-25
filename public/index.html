@@ -74,7 +74,9 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #top{padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px}
 #top h2{margin:0;font-size:22px;flex:1}
 #msgs{flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
-.m{display:flex;gap:10px}.m p{margin:2px 0 0;word-break:break-word}.m small{color:var(--mut)}
+.m{display:flex;gap:10px}.m p{margin:2px 0 0;word-break:break-word;white-space:pre-wrap}
+#txt{flex:1;resize:none;min-height:40px;max-height:140px;overflow-y:auto;line-height:1.4;font:inherit;color:inherit;background:var(--pan2);border:1px solid var(--bd);border-radius:6px;padding:9px 10px;box-sizing:border-box}
+#send{align-items:flex-end}.m small{color:var(--mut)}
 .m .del,.m .rbtn{opacity:0}.m:hover .rbtn{opacity:1}
 .rbtn{font-size:12px;padding:0 5px;line-height:18px}
 .ment{color:#8ab4ff;background:rgba(88,101,242,.18);border-radius:4px;padding:0 2px;font-weight:600}.ment.ment-me{color:#ffd166;background:rgba(255,209,102,.18)}
@@ -86,7 +88,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #npanel .ni{padding:8px;border-radius:8px;cursor:pointer;border-left:3px solid transparent}#npanel .ni:hover{background:var(--pan2)}#npanel .ni.new{border-left-color:#ffd166;background:rgba(255,209,102,.06)}
 #npanel .ni p{margin:3px 0;color:var(--tx);word-break:break-word}#npanel .ni small,#npanel .nempty{color:var(--mut)}
 #send{position:relative}#mbox{position:absolute;left:10px;bottom:calc(100% + 4px);width:260px;background:#140a0e;border:1px solid var(--bd);border-radius:10px;padding:4px;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,.5)}
-#mbox .mo{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer}#mbox .mo.on,#mbox .mo:hover{background:var(--pan2)}#mbox .mo .av{width:22px;height:22px;font-size:11px}
+#mbox .mo{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer}#mbox .mo.on,#mbox .mo:hover{background:var(--pan2)}#mbox .mo .av{width:22px;height:22px;font-size:11px}#mbox .mo small{margin-left:auto;color:var(--mut);font-size:11px}
 .rx{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.rx:empty{display:none}
 .rchip{font-size:13px;padding:1px 7px;border-radius:10px;background:var(--pan2);border:1px solid var(--bd);line-height:20px}
 .rchip.mine{border-color:var(--btn,var(--red));background:rgba(225,29,46,.18)}
@@ -203,7 +205,7 @@ input[type=color]{width:48px;height:36px;padding:2px;border-radius:6px;cursor:po
   <main>
     <div id="top"><button id="navBtn" class="mob" aria-label="Channels">☰</button><h2 id="title"></h2><span id="topact"></span><button id="memBtn" class="mob" aria-label="Members">👥</button></div>
     <div id="msgs"></div>
-    <form id="send"><input id="txt" placeholder="Type a message..." autocomplete="off" maxlength="500"><button type="button" id="emob" title="Emoji">😊</button><button class="p">Send</button></form>
+    <form id="send"><textarea id="txt" rows="1" placeholder="Type a message... (Shift+Enter for a new line)" autocomplete="off" maxlength="500"></textarea><button type="button" id="emob" title="Emoji">😊</button><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
     <div id="bbox" class="hide"></div>
   </main>
@@ -289,7 +291,7 @@ function on(m){
   else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
   else if(m.t=='kicked'||m.t=='denied'){want(null);leaveVoice(true);toast(m.by?'You were disconnected from voice by a moderator':'You no longer have access to that voice channel')}
   else if(m.t=='error')alert(m.msg);
-  else if(m.t=='notif'){notifs=[m.n,...notifs].slice(0,50);drawBell();sMention();toast('🔔 '+m.n.fromName+' mentioned you in #'+m.n.chName);deskNotify(m.n)}
+  else if(m.t=='notif'){notifs=[m.n,...notifs].slice(0,50);drawBell();sMention();toast('🔔 '+m.n.fromName+(m.n.all?' mentioned @everyone':' mentioned you')+' in #'+m.n.chName);deskNotify(m.n)}
   else if(m.t=='notifs'){notifs=m.list;drawBell();if($('#npanel'))notifPanel(true)}
   else if(m.t=='react'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"] .rx');e&&drawRx(e,m.id,m.re)}
   else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
@@ -341,6 +343,7 @@ function msgText(t){   // show @Name in the mention colour (plain text otherwise
   const p=E('p');const names=S.users.map(u=>u.name).sort((a,b)=>b.length-a.length);
   const low=t.toLowerCase();let i=0,last=0;
   while((i=low.indexOf('@',i))>=0){
+    if(low.startsWith('@everyone',i)&&!/[a-z0-9_]/i.test(low[i+9]||' ')){p.append(t.slice(last,i),E('span','ment ment-me','@everyone'));i+=9;last=i;continue}
     const n=names.find(n=>low.startsWith('@'+n.toLowerCase(),i)&&!/[a-z0-9_]/i.test(low[i+n.length+1]||' '));
     if(n){p.append(t.slice(last,i));const s=E('span','ment'+(n==(S.users.find(u=>u.key==S.me.key)||{}).name?' ment-me':''),t.slice(i,i+n.length+1));p.append(s);i+=n.length+1;last=i}else i++;
   }
@@ -359,7 +362,7 @@ function notifPanel(refresh){
   if(!notifs.length)p.append(E('small','nempty','No mentions yet. When someone types @'+((S.users.find(u=>u.key==S.me.key)||{}).name||'you')+' you will see it here.'));
   notifs.forEach(n=>{
     const r=E('div','ni'+(n.read?'':' new'));
-    r.append(E('div',0,n.fromName+' mentioned you in #'+n.chName),E('p',0,n.text),E('small',0,new Date(n.ts).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})));
+    r.append(E('div',0,n.fromName+(n.all?' mentioned @everyone':' mentioned you')+' in #'+n.chName),E('p',0,n.text),E('small',0,new Date(n.ts).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})));
     r.onclick=()=>{if(!n.read)tx({t:'notifread',id:n.id});p.remove();const c=S.channels.find(x=>x.id==n.ch);if(!c)return toast('That channel is not available any more');jumpId=n.msg;if(cur&&cur.id==c.id)jumpTo();else pick(c)};
     p.append(r);
   });
@@ -379,12 +382,13 @@ function mentionBox(){
   let box=$('#mbox');
   const q=at>=0&&(at==0||/\s/.test(before[at-1]))?before.slice(at+1):null;
   if(q==null||q.length>20||/\n/.test(q)){box&&box.remove();mq=null;return}
-  const list=S.users.filter(u=>!u.banned&&u.key!=S.me.key&&u.name.toLowerCase().startsWith(q.toLowerCase())).sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).slice(0,8);
+  let list=S.users.filter(u=>!u.banned&&u.key!=S.me.key&&u.name.toLowerCase().startsWith(q.toLowerCase())).sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).slice(0,8);
+  if((S.me.role=='admin'||S.me.perms.includes('everyone'))&&'everyone'.startsWith(q.toLowerCase()))list=[{key:'~all',name:'everyone',all:1},...list].slice(0,8);
   if(!list.length){box&&box.remove();mq=null;return}
   if(!box){box=E('div');box.id='mbox';$('#send').append(box)}
   mq={at,end:pos,list,sel:mq&&mq.list.length==list.length?Math.min(mq.sel,list.length-1):0};
   box.replaceChildren();
-  list.forEach((u,ix)=>{const r=E('div','mo'+(ix==mq.sel?' on':''));r.append(avEl(u.key,u.name),E('span',0,u.name));const c=nameColor(u);if(c)r.lastChild.style.color=c;r.onmousedown=e=>{e.preventDefault();mq.sel=ix;pickMention()};box.append(r)});
+  list.forEach((u,ix)=>{const r=E('div','mo'+(ix==mq.sel?' on':''));r.append(u.all?E('div','av','📢'):avEl(u.key,u.name),E('span',0,u.all?'@everyone':u.name));if(u.all)r.append(E('small',0,'notify everyone here'));const c=nameColor(u);if(c)r.lastChild.style.color=c;r.onmousedown=e=>{e.preventDefault();mq.sel=ix;pickMention()};box.append(r)});
 }
 function pickMention(){
   const i=$('#txt'),u=mq.list[mq.sel],ins='@'+u.name+' ';
@@ -398,9 +402,9 @@ function addMsg(m){
   h.append(nb,E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
   const mid=m.id||m.ts;d.dataset.id=mid;
   const rb=E('button','x rbtn','😊+');rb.title='React';rb.onclick=e=>{e.stopPropagation();emojiPop(rb,em=>tx({t:'react',ch:cur.id,id:mid,e:em}))};h.append(' ',rb);
-  if(S.me.role=='admin'){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}
+  if(S.me.role=='admin'||m.key==S.me.key){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>confirm('Delete this message?')&&tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}   // your own messages, or any message for the admin
   const rx=E('div','rx');b.append(h,msgText(m.text),rx);d.append(b);drawRx(rx,mid,m.re);
-  if((m.men||[]).includes(S.me.key))d.classList.add('mentioned');   // a message that mentions me stands out
+  if(m.all||(m.men||[]).includes(S.me.key))d.classList.add('mentioned');   // a message that mentions me stands out
   const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
 }
 /* ---------- Install as an app (own window, taskbar/desktop icon, no browser bars) ---------- */
@@ -826,7 +830,7 @@ function manage(u){
   voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
   modal(u.name,...n);managing={k:u.key,sig:JSON.stringify([u.roles,u.banned])};
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",bracket:'Edit the tournament bracket (names, layout, colours, background)',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",everyone:'Use @everyone (notifies everyone in the channel)',bracket:'Edit the tournament bracket (names, layout, colours, background)',private:'See private voice and text channels'};
 function roleRow(id,r){
   const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');
@@ -857,10 +861,18 @@ $('#txt').addEventListener('blur',()=>setTimeout(()=>{$('#mbox')&&$('#mbox').rem
 $('#txt').addEventListener('keydown',e=>{
   if(!mq||!$('#mbox'))return;
   if(e.key=='ArrowDown'||e.key=='ArrowUp'){e.preventDefault();mq.sel=(mq.sel+(e.key=='ArrowDown'?1:-1)+mq.list.length)%mq.list.length;[...$('#mbox').children].forEach((r,ix)=>r.classList.toggle('on',ix==mq.sel))}
-  else if(e.key=='Enter'||e.key=='Tab'){e.preventDefault();pickMention()}
+  else if(e.key=='Enter'||e.key=='Tab'){e.preventDefault();e.stopImmediatePropagation();pickMention()}   // picking a name must not also send
   else if(e.key=='Escape'){$('#mbox').remove();mq=null}
 });
-$('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value=''};
+// Enter sends, Shift+Enter makes a new line; the box grows with the text (up to a few lines)
+const txtFit=()=>{const i=$('#txt');i.style.height='auto';i.style.height=Math.min(i.scrollHeight,140)+'px'};
+$('#txt').addEventListener('input',txtFit);
+$('#txt').addEventListener('keydown',e=>{
+  if(e.key!='Enter'||e.shiftKey||e.isComposing||mq&&$('#mbox'))return;   // (Enter in the @ list picks a name)
+  if(matchMedia('(pointer:coarse)').matches)return;   // phones: Enter is a new line, tap Send to send (like Discord mobile)
+  e.preventDefault();$('#send').requestSubmit();
+});
+$('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value='';txtFit()};
 
 /* ---------- Drag and drop (channels, categories) ---------- */
 let drag=null;const unfold=new Set();   // member groups are collapsed until opened (every time the app starts)
