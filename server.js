@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
 const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
+const BUILD = '2026-09-26-shrink';   // must match BUILD in public/index.html (the page warns the admin when they differ)
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
@@ -149,6 +150,51 @@ app.delete('/api/theme/:w(bg|logo|bracket)', (req, res) => {   // back to the or
   save(); push(); res.json({ ok: true });
 });
 
+// ---- Photos in chat: kept for 5 days, then deleted to save disk space ----
+// Only in channels where the admin allowed photos. Files live next to data.json in "uploads".
+const UP_DIR = path.join(process.env.DATA_DIR || __dirname, 'uploads');
+try { fs.mkdirSync(UP_DIR, { recursive: true }); } catch {}
+const IMG_DAYS = 5, IMG_MAX = 2 * 1024 * 1024 + 64 * 1024, IMG_PER_MSG = 4;   // 2 MB per photo (the page shrinks bigger ones before sending)
+const IMG_EXT = /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|heic|heif|tiff?|ico)$/i;
+const upFile = id => path.join(UP_DIR, id);
+const sessionUser = req => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && U(k) && !db.banned[k] ? k : null; };
+app.post('/api/upload', express.raw({ type: () => true, limit: IMG_MAX }), (req, res) => {
+  const k = sessionUser(req);
+  if (!k) return res.sendStatus(401);
+  const c = chan(String(req.query.ch || ''));
+  if (!c || !can(k, c) || c.type !== 'text') return res.status(403).json({ error: 'You cannot post in this channel' });
+  if (!c.photos) return res.status(403).json({ error: 'Photos are not allowed in this channel' });
+  const type = String(req.headers['content-type'] || '').toLowerCase(), name = decodeURIComponent(String(req.headers['x-name'] || ''));
+  if (!type.startsWith('image/') && !IMG_EXT.test(name)) return res.status(400).json({ error: 'Only pictures can be sent' });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Empty file' });
+  const mine = Object.values(db.uploads || {}).filter(x => x.by === k && !x.msg && Date.now() - x.ts < 3600e3).length;
+  if (mine >= 12) return res.status(429).json({ error: 'Too many pictures waiting to be sent' });
+  const id = crypto.randomBytes(12).toString('hex');
+  try { fs.writeFileSync(upFile(id), req.body); } catch { return res.status(500).json({ error: 'Could not save the picture' }); }
+  db.uploads = db.uploads || {};
+  db.uploads[id] = { by: k, ch: c.id, type: type.startsWith('image/') ? type : 'application/octet-stream', name: name.slice(0, 80), size: req.body.length, ts: Date.now(), msg: null };
+  save(); res.json({ id });
+});
+app.get('/img/:id', (req, res) => {
+  const id = String(req.params.id), meta = (db.uploads || {})[id];
+  if (!/^[0-9a-f]{24}$/.test(id) || !meta || !fs.existsSync(upFile(id))) return res.sendStatus(404);
+  res.set({ 'Content-Type': meta.type, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'", 'Cache-Control': 'private, max-age=86400' });
+  if (req.query.dl) res.attachment(meta.name || (id + '.png'));
+  res.sendFile(upFile(id));
+});
+function dropImages(ids) { (ids || []).forEach(x => { try { fs.unlinkSync(upFile(x.id || x)); } catch {} if (db.uploads) delete db.uploads[x.id || x]; }); }
+function sweepImages() {   // every 30 minutes: photos older than 5 days are deleted; pictures never sent are deleted after an hour
+  const now = Date.now(), gone = new Set();
+  for (const [id, x] of Object.entries(db.uploads || {})) {
+    if (now - x.ts > IMG_DAYS * 864e5 || (!x.msg && now - x.ts > 3600e3)) { dropImages([id]); gone.add(id); }
+  }
+  if (!gone.size) return;
+  for (const [ch, list] of Object.entries(db.msgs)) (list || []).forEach(msg => (msg.imgs || []).forEach(im => { if (gone.has(im.id)) im.expired = true; }));
+  console.log('[photos] deleted', gone.size, 'old picture(s)');
+  save(); push();
+}
+setInterval(sweepImages, 30 * 60e3); setTimeout(sweepImages, 5000);   // also shortly after every start
+
 app.get('/av/:k', (req, res) => {
   const u = U(req.params.k);
   if (!u || !u.avatar) return res.sendStatus(404);
@@ -292,7 +338,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {}, notifs: db.users[w.key].notifs || [] },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', build: BUILD, bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -425,8 +471,10 @@ function handle(w, m) {
     case 'read': markRead(k, m.ch); break;   // saw new messages while the channel was open
     case 'chat': {
       const c = chan(m.ch), text = String(m.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
-      if (!can(k, c) || !text) break;
+      const imgs = c && c.photos ? (Array.isArray(m.imgs) ? m.imgs : []).map(String).filter(id => { const x = (db.uploads || {})[id]; return x && x.by === k && x.ch === c.id && !x.msg; }).slice(0, IMG_PER_MSG) : [];
+      if (!can(k, c) || (!text && !imgs.length)) break;
       const msg = { id: crypto.randomBytes(4).toString('hex'), key: k, name: u.name, text, ts: Date.now() };
+      if (imgs.length) { msg.imgs = imgs.map(id => ({ id, type: db.uploads[id].type, name: db.uploads[id].name })); imgs.forEach(id => { db.uploads[id].msg = msg.id; }); }
       let men = mentionsIn(text, k, c);
       const all = /(^|\s)@everyone(?![a-z0-9_])/i.test(text) && (adm || has('everyone'));   // @everyone: admin / Senior (the "everyone" permission)
       if (all) { msg.all = true; men = Object.keys(db.users).filter(x => x !== k && !db.banned[x] && can(x, c)); }
@@ -486,6 +534,11 @@ function handle(w, m) {
       const roles = cleanRoles(m.roles);
       db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !roles.length && !!m.open, roles, cat: db.cats.some(x => x.id === m.cat) ? m.cat : '' });
       done(); break;
+    }
+    case 'chphotos': {   // admin: allow or stop pictures in a text channel
+      const c = chan(m.id);
+      if (!adm || !c || c.type !== 'text') break;
+      c.photos = !!m.on; done(); break;
     }
     case 'chaccess': {   // who can see and enter one channel
       const c = chan(m.id);
@@ -574,7 +627,7 @@ function handle(w, m) {
       const target = (db.msgs[c.id] || []).find(x => (x.id || x.ts) === m.id);
       if (!target) return send(w, { t: 'error', msg: 'That message was already deleted.' });
       if (!(adm || target.key === k)) return send(w, { t: 'error', msg: 'You can only delete your own messages.' });   // the admin can delete any message
-      db.msgs[c.id] = db.msgs[c.id].filter(x => x !== target); save();
+      db.msgs[c.id] = db.msgs[c.id].filter(x => x !== target); dropImages(target.imgs); save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'del', ch: c.id, id: m.id }));
       break;
     }
@@ -599,7 +652,7 @@ function handle(w, m) {
     case 'clear': {
       const c = chan(m.ch);
       if (!adm || !c) break;
-      db.msgs[c.id] = []; save();
+      (db.msgs[c.id] || []).forEach(x => dropImages(x.imgs)); db.msgs[c.id] = []; save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'clear', ch: c.id }));
       break;
     }

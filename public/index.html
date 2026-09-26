@@ -285,7 +285,7 @@ function on(m){
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
     showUnread();
-    notifs=S.me.notifs||[];
+    notifs=S.me.notifs||[];checkBuild();
     render();syncPeers();repaintNames();applyTheme(m.theme);
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
@@ -450,14 +450,34 @@ function drawPend(){
   row.replaceChildren();
   pend.forEach(p=>{const t=E('div','pt'+(p.busy?' busy':''));const i=E('img');i.src=p.url;const x=E('button','x','✕');x.title='Remove';x.onclick=()=>{pend=pend.filter(q=>q!==p);drawPend()};t.append(i,x);if(p.busy)t.append(E('small',0,'Uploading…'));row.append(t)});
 }
+const IMG_LIMIT=2*1024*1024;   // photos bigger than 2 MB are shrunk in the browser before upload
+async function shrinkImg(f){
+  if(f.size<=IMG_LIMIT)return f;
+  if(/gif/i.test(f.type))throw new Error('GIF is too big (max 2 MB) — moving GIFs cannot be shrunk');
+  let bmp;try{bmp=await createImageBitmap(f)}catch{throw new Error((f.name||'Photo')+' is too big (max 2 MB) and this picture type cannot be shrunk here')}
+  const cv=document.createElement('canvas'),cx=cv.getContext('2d');
+  let scale=Math.min(1,2560/Math.max(bmp.width,bmp.height));
+  for(let round=0;round<7;round++){
+    cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));
+    cx.fillStyle='#000';cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);
+    for(const q of [0.86,0.76,0.66]){
+      let b=await new Promise(r=>cv.toBlob(r,'image/webp',q));   // WebP keeps quality high at small sizes
+      if(!b||b.type!='image/webp')b=await new Promise(r=>cv.toBlob(r,'image/jpeg',q));   // browsers without WebP saving
+      if(b&&b.size<=IMG_LIMIT){bmp.close&&bmp.close();const ext=b.type=='image/webp'?'webp':'jpg';return new File([b],(f.name||'photo').replace(/\.[^.]+$/,'')+'.'+ext,{type:b.type})}
+    }
+    scale*=0.8;
+  }
+  throw new Error('Could not make the photo small enough');
+}
 async function attach(files){
   if(!cur||cur.type!='text'||!cur.photos)return toast('Photos are not allowed in this channel');
-  for(const f of files){
+  for(let f of files){
     if(!/^image\//.test(f.type)&&!/\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(f.name||''))continue;
     if(pend.length>=4){toast('Up to 4 photos per message');break}
-    if(f.size>10*1024*1024){toast((f.name||'Photo')+' is too big (max 10 MB)');continue}
     const p={url:URL.createObjectURL(f),name:f.name||'pasted.png',busy:true};pend.push(p);drawPend();
     try{
+      if(f.size>40*1024*1024)throw new Error((f.name||'Photo')+' is too big');
+      f=await shrinkImg(f);p.name=f.name||p.name;
       const r=await fetch('/api/upload?ch='+encodeURIComponent(cur.id),{method:'POST',headers:{'Content-Type':f.type||'application/octet-stream','X-Name':encodeURIComponent(p.name),Authorization:'Bearer '+tok},body:f});
       const j=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(j.error||'Upload failed');
@@ -473,6 +493,12 @@ function viewImg(im){   // full size view
   const close=()=>w.remove();x.onclick=close;w.onclick=e=>{if(e.target===w)close()};
   addEventListener('keydown',function k(e){if(e.key=='Escape'){close();removeEventListener('keydown',k)}});
   document.body.append(w);
+}
+let photoWatch=null;   // confirm the admin's photo switch once the server has applied it
+function checkPhotoWatch(){
+  if(!photoWatch)return;const c=S.channels.find(x=>x.id==photoWatch.id);
+  if(c&&!!c.photos===photoWatch.on){toast((photoWatch.on?'🖼 Photos are now allowed in #':'🚫 Photos are now off in #')+c.name);photoWatch=null}
+  else if(Date.now()-photoWatch.t>4000){toast('The server did not apply it. Make sure the new server.js is deployed.');photoWatch=null}
 }
 function syncAttach(){   // the 🖼 button shows only where photos are allowed
   const ok=!!(cur&&cur.type=='text'&&cur.photos);$('#attb').classList.toggle('hide',!ok);
@@ -734,6 +760,13 @@ function appearance(){
   const crow=E('div','row');crow.append(col,prev,cr);
   modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
+const BUILD='2026-09-26-shrink';   // must match BUILD in server.js
+let buildWarned=false;
+function checkBuild(){   // admin only: the page and the server are from different updates (usually server.js was not uploaded)
+  if(buildWarned||S.me.role!='admin'||S.build===BUILD)return;buildWarned=true;
+  modal('Update not complete',E('p',0,'The website page and the server are from different updates. Upload BOTH server.js and public/index.html to GitHub, then wait for Render to finish deploying and refresh this page.'),
+    E('small',0,'Server: '+(S.build||'older version')+' • Page: '+BUILD));
+}
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
 function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0)+(typeof notifs!='undefined'?notifs.filter(x=>!x.read).length:0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
@@ -784,7 +817,7 @@ function render(){
       if(c.roles&&c.roles.length)d.title='Only: '+c.roles.map(r=>(S.roles[r]||{name:r}).name).join(', ');
       if(P('channels')){
         const menu=e=>ctx(e,[c.name,['Rename channel',()=>{const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})}],
-          ...(me.role=='admin'&&c.type=='text'?[[c.photos?'🚫 Stop allowing photos':'🖼 Allow photos',()=>tx({t:'chphotos',id:c.id,on:!c.photos})]]:[]),
+          ...(me.role=='admin'&&c.type=='text'?[[c.photos?'🚫 Stop allowing photos':'🖼 Allow photos',()=>{tx({t:'chphotos',id:c.id,on:!c.photos});photoWatch={id:c.id,on:!c.photos,t:Date.now()};setTimeout(checkPhotoWatch,4200)}]]:[]),
           ...(c.id!='open'?[['Who can enter…',()=>chAccess(c)],['Delete channel',()=>confirm('Delete "'+c.name+'"? Its messages will be lost.')&&tx({t:'delch',id:c.id}),'dng']]:[])]);
         d.oncontextmenu=menu;d.append(more(menu));dg(d,{kind:'ch',id:c.id});
       }
@@ -818,7 +851,7 @@ function render(){
     const ed=E('button','p','Edit layout');ed.onclick=()=>{bkEdit=true;bkLocal=JSON.parse(JSON.stringify(S.bk||bkDef()));bkSel=null;bkPen=null;render()};
     ta.append(cl,ed);
   }
-  syncAttach();
+  syncAttach();checkPhotoWatch();
   $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!!brk||!cur);$('#bbox').classList.toggle('hide',!brk);
   if(brk)drawBracket();else if(cur&&!txt)panel();
   // members, grouped by role (Admin first, Default last, Banned only visible to moderators)
