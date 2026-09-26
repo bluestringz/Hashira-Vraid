@@ -551,6 +551,23 @@ function handle(w, m) {
       live().forEach(x => can(x.key, c) && send(x, { t: 'react', ch: c.id, id: m.id, re: msg.re || {} }));
       break;
     }
+    case 'editmsg': {   // edit your own message; the old versions are kept as edit history
+      const c = chan(m.ch);
+      if (!c || !can(k, c)) break;
+      const target = (db.msgs[c.id] || []).find(x => (x.id || x.ts) === m.id);
+      if (!target) return send(w, { t: 'error', msg: 'That message was deleted.' });
+      if (target.key !== k) return send(w, { t: 'error', msg: 'You can only edit your own messages.' });
+      const text = String(m.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
+      if (!text || text === target.text) break;
+      target.hist = [...(target.hist || []), { text: target.text, ts: target.edited || target.ts }].slice(-20);
+      target.text = text; target.edited = Date.now();
+      const men = mentionsIn(text, k, c);   // colours/highlight follow the new text (no new notifications on edit)
+      if (target.all) { if (!/(^|\s)@everyone(?![a-z0-9_])/i.test(text)) delete target.all; }
+      if (men.length && !target.all) target.men = men; else delete target.men;
+      save();
+      live().forEach(x => can(x.key, c) && send(x, { t: 'edit', ch: c.id, msg: target }));
+      break;
+    }
     case 'delmsg': {
       const c = chan(m.ch);
       if (!c || !can(k, c)) break;

@@ -90,6 +90,19 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #npanel .ni p{margin:3px 0;color:var(--tx);word-break:break-word}#npanel .ni small,#npanel .nempty{color:var(--mut)}
 #send{position:relative}#mbox{position:absolute;left:10px;bottom:calc(100% + 4px);width:260px;background:#140a0e;border:1px solid var(--bd);border-radius:10px;padding:4px;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 #mbox .mo{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer}#mbox .mo.on,#mbox .mo:hover{background:var(--pan2)}#mbox .mo .av{width:22px;height:22px;font-size:11px}#mbox .mo small{margin-left:auto;color:var(--mut);font-size:11px}
+.edited{cursor:pointer;font-size:11px}.edited:hover{text-decoration:underline}
+.medit textarea{width:100%;box-sizing:border-box;resize:none;font:inherit;color:inherit;background:var(--pan2);border:1px solid var(--bd);border-radius:6px;padding:7px 9px;margin-top:3px}
+.medit .row{display:flex;gap:6px;align-items:center;margin-top:4px}.medit .row button{font-size:12px;padding:3px 10px}.medit small{color:var(--mut)}
+.ehist{padding:8px;border-left:3px solid var(--bd);margin:4px 0;background:var(--pan2);border-radius:6px}.ehist.cur{border-left-color:#ffd166}.ehist p{margin:3px 0 0;white-space:pre-wrap;word-break:break-word}
+.imgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}.imgs img{max-width:min(320px,100%);max-height:260px;border-radius:8px;cursor:zoom-in;display:block;background:rgba(0,0,0,.3)}
+.imgx{font-size:12px;color:var(--mut);background:var(--pan2);border:1px dashed var(--bd);border-radius:8px;padding:10px 12px;cursor:default}
+#pend{position:absolute;left:0;right:0;bottom:calc(100% + 4px);display:flex;gap:8px;padding:8px;background:#140a0e;border:1px solid var(--bd);border-radius:10px;z-index:30}
+#pend .pt{position:relative;width:84px;height:84px;border-radius:8px;overflow:hidden;background:#000}#pend .pt img{width:100%;height:100%;object-fit:cover}
+#pend .pt.busy img{opacity:.4}#pend .pt small{position:absolute;left:4px;bottom:4px;font-size:10px;color:#fff}#pend .pt .x{position:absolute;top:2px;right:2px;padding:0 6px;font-size:12px;background:rgba(0,0,0,.7);border-radius:6px}
+#attb{font-size:17px;padding:0 10px}
+#send>button{min-height:40px}
+#lbox{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px}
+#lbox img{max-width:100%;max-height:calc(100% - 60px);object-fit:contain;border-radius:6px}#lbox .lbar{display:flex;gap:8px}#lbox a.p{padding:7px 14px;border-radius:6px;text-decoration:none;color:#fff;background:var(--btn,var(--red))}
 .rx{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.rx:empty{display:none}
 .rchip{font-size:13px;padding:1px 7px;border-radius:10px;background:var(--pan2);border:1px solid var(--bd);line-height:20px}
 .rchip.mine{border-color:var(--btn,var(--red));background:rgba(225,29,46,.18)}
@@ -206,7 +219,7 @@ input[type=color]{width:48px;height:36px;padding:2px;border-radius:6px;cursor:po
   <main>
     <div id="top"><button id="navBtn" class="mob" aria-label="Channels">☰</button><h2 id="title"></h2><span id="topact"></span><button id="memBtn" class="mob" aria-label="Members">👥</button></div>
     <div id="msgs"></div>
-    <form id="send"><textarea id="txt" rows="1" placeholder="Type a message... (Shift+Enter for a new line)" autocomplete="off" maxlength="500"></textarea><button type="button" id="emob" title="Emoji">😊</button><button class="p">Send</button></form>
+    <form id="send"><textarea id="txt" rows="1" placeholder="Type a message... (Shift+Enter for a new line)" autocomplete="off" maxlength="500"></textarea><button type="button" id="attb" title="Send a photo" class="hide">🖼</button><input type="file" id="attf" accept="image/*" multiple hidden><button type="button" id="emob" title="Emoji">😊</button><button class="p">Send</button></form>
     <div id="vbox" class="hide"></div>
     <div id="bbox" class="hide"></div>
   </main>
@@ -277,7 +290,7 @@ function on(m){
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
     reconcile();
-  }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg);jumpTo()}
+  }else if(m.t=='history'&&cur&&m.ch==cur.id){$('#msgs').replaceChildren();m.msgs.forEach(addMsg);$('#msgs').scrollTop=$('#msgs').scrollHeight;jumpTo()}
   else if(m.t=='chat'){
     const here=cur&&m.ch==cur.id;
     if(here)addMsg(m.msg);
@@ -294,6 +307,7 @@ function on(m){
   else if(m.t=='error')alert(m.msg);
   else if(m.t=='notif'){notifs=[m.n,...notifs].slice(0,50);drawBell();sMention();toast('🔔 '+m.n.fromName+(m.n.all?' mentioned @everyone':' mentioned you')+' in #'+m.n.chName);deskNotify(m.n)}
   else if(m.t=='notifs'){notifs=m.list;drawBell();if($('#npanel'))notifPanel(true)}
+  else if(m.t=='edit'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.msg.id||m.msg.ts))+'"]');if(e&&!e.querySelector('.medit'))e.replaceWith(msgEl(m.msg));else if(e)e._m=m.msg}
   else if(m.t=='react'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"] .rx');e&&drawRx(e,m.id,m.re)}
   else if(m.t=='del'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"]');e&&e.remove()}
   else if(m.t=='clear'){delete unread[m.ch];showUnread();if(cur&&m.ch==cur.id)$('#msgs').replaceChildren();else render()}
@@ -406,17 +420,79 @@ function pickMention(){
   i.value=(i.value.slice(0,mq.at)+ins+i.value.slice(mq.end)).slice(0,500);i.focus();i.selectionStart=i.selectionEnd=mq.at+ins.length;
   $('#mbox')&&$('#mbox').remove();mq=null;
 }
-function addMsg(m){
+function msgEl(m){   // one chat message
   const d=E('div','m');d.append(avEl(m.key,m.name));
-  const b=E('div'),h=E('div'),u=S.users.find(x=>x.key==m.key);
+  const b=E('div'),h=E('div');
   const nb=E('b','nm');nb.dataset.k=m.key;nb.dataset.n=m.name;paintName(nb);nb.oncontextmenu=e=>{const x=S.users.find(y=>y.key==m.key);if(x)userMenu(e,x)};
   h.append(nb,E('small',0,' '+new Date(m.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));
-  const mid=m.id||m.ts;d.dataset.id=mid;
+  if(m.edited){const ed=E('small','edited',' (edited)');ed.title='Edited '+new Date(m.edited).toLocaleString()+' • click to see the edit history';ed.onclick=()=>editHistory(m);h.append(ed)}
+  const mid=m.id||m.ts;d.dataset.id=mid;d._m=m;
   const rb=E('button','x rbtn','😊+');rb.title='React';rb.onclick=e=>{e.stopPropagation();emojiPop(rb,em=>tx({t:'react',ch:cur.id,id:mid,e:em}))};h.append(' ',rb);
+  if(m.key==S.me.key){const eb=E('button','x del','✏️');eb.title='Edit message';eb.onclick=()=>editMsg(d);h.append(' ',eb)}
   if(S.me.role=='admin'||m.key==S.me.key){const x=E('button','x del','🗑');x.title='Delete message';x.onclick=()=>confirm('Delete this message?')&&tx({t:'delmsg',ch:cur.id,id:mid});h.append(' ',x)}   // your own messages, or any message for the admin
-  const rx=E('div','rx');b.append(h,msgText(m.text),rx);d.append(b);drawRx(rx,mid,m.re);
+  const rx=E('div','rx');b.append(h);if(m.text)b.append(msgText(m.text));
+  if(m.imgs&&m.imgs.length){const g=E('div','imgs');m.imgs.forEach(im=>{
+    if(im.expired){g.append(E('div','imgx','🕒 Photo expired (photos are kept for 5 days)'));return}
+    const i=E('img');i.src='/img/'+im.id;i.alt=im.name||'photo';i.loading='lazy';i.onclick=()=>viewImg(im);
+    i.onerror=()=>{const x=E('div','imgx',/heic|heif|tiff/i.test(im.name||'')?'📎 '+(im.name||'photo')+' (this picture type cannot be shown in the browser — click to download)':'🕒 Photo not available');x.onclick=()=>open('/img/'+im.id+'?dl=1','_blank');i.replaceWith(x)};
+    i.onload=()=>{const box=$('#msgs');if(box.scrollHeight-box.scrollTop-box.clientHeight<i.naturalHeight+160)box.scrollTop=box.scrollHeight};
+    g.append(i)});b.append(g)}
+  b.append(rx);d.append(b);drawRx(rx,mid,m.re);
   if(m.all||(m.men||[]).includes(S.me.key))d.classList.add('mentioned');   // a message that mentions me stands out
-  const box=$('#msgs');box.append(d);box.scrollTop=box.scrollHeight;
+  return d;
+}
+/* ---------- Photos: attach with 🖼, paste (Ctrl+V) or drag-and-drop; kept for 5 days ---------- */
+let pend=[];   // pictures uploaded and waiting to be sent: {id, url, name, busy}
+function drawPend(){
+  let row=$('#pend');
+  if(!pend.length){row&&row.remove();return}
+  if(!row){row=E('div');row.id='pend';$('#send').prepend(row)}
+  row.replaceChildren();
+  pend.forEach(p=>{const t=E('div','pt'+(p.busy?' busy':''));const i=E('img');i.src=p.url;const x=E('button','x','✕');x.title='Remove';x.onclick=()=>{pend=pend.filter(q=>q!==p);drawPend()};t.append(i,x);if(p.busy)t.append(E('small',0,'Uploading…'));row.append(t)});
+}
+async function attach(files){
+  if(!cur||cur.type!='text'||!cur.photos)return toast('Photos are not allowed in this channel');
+  for(const f of files){
+    if(!/^image\//.test(f.type)&&!/\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(f.name||''))continue;
+    if(pend.length>=4){toast('Up to 4 photos per message');break}
+    if(f.size>10*1024*1024){toast((f.name||'Photo')+' is too big (max 10 MB)');continue}
+    const p={url:URL.createObjectURL(f),name:f.name||'pasted.png',busy:true};pend.push(p);drawPend();
+    try{
+      const r=await fetch('/api/upload?ch='+encodeURIComponent(cur.id),{method:'POST',headers:{'Content-Type':f.type||'application/octet-stream','X-Name':encodeURIComponent(p.name),Authorization:'Bearer '+tok},body:f});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(j.error||'Upload failed');
+      p.id=j.id;p.busy=false;
+    }catch(e){pend=pend.filter(q=>q!==p);toast(e.message||'Upload failed')}
+    drawPend();
+  }
+}
+function viewImg(im){   // full size view
+  const w=E('div');w.id='lbox';const i=E('img');i.src='/img/'+im.id;
+  const dl=E('a','p','Download');dl.href='/img/'+im.id+'?dl=1';dl.target='_blank';
+  const x=E('button',0,'✕ Close');const bar=E('div','lbar');bar.append(dl,x);w.append(i,bar);
+  const close=()=>w.remove();x.onclick=close;w.onclick=e=>{if(e.target===w)close()};
+  addEventListener('keydown',function k(e){if(e.key=='Escape'){close();removeEventListener('keydown',k)}});
+  document.body.append(w);
+}
+function syncAttach(){   // the 🖼 button shows only where photos are allowed
+  const ok=!!(cur&&cur.type=='text'&&cur.photos);$('#attb').classList.toggle('hide',!ok);
+  if(!ok&&pend.length){pend=[];drawPend()}
+}
+function addMsg(m){const box=$('#msgs'),near=box.scrollHeight-box.scrollTop-box.clientHeight<120;box.append(msgEl(m));if(near||m.key==S.me.key)box.scrollTop=box.scrollHeight}
+function editMsg(d){   // edit in place: Enter saves, Shift+Enter new line, Esc cancels
+  const m=d._m,p=d.querySelector(':scope > div > p');if(!p||d.querySelector('.medit'))return;
+  const w=E('div','medit'),t=E('textarea');t.maxLength=500;t.value=m.text;
+  const sv=E('button','p','Save'),cn=E('button',0,'Cancel'),row=E('div','row');row.append(sv,cn,E('small',0,'Enter to save • Esc to cancel'));
+  const fit=()=>{t.style.height='auto';t.style.height=Math.min(t.scrollHeight,200)+'px'};
+  const done=()=>{w.replaceWith(p)};
+  sv.onclick=()=>{const v=t.value.trim();if(v&&v!==m.text)tx({t:'editmsg',ch:cur.id,id:m.id||m.ts,text:v});done()};
+  cn.onclick=done;
+  t.onkeydown=e=>{if(e.key=='Escape'){e.preventDefault();done()}else if(e.key=='Enter'&&!e.shiftKey&&!matchMedia('(pointer:coarse)').matches){e.preventDefault();sv.click()}};
+  t.oninput=fit;w.append(t,row);p.replaceWith(w);fit();t.focus();t.selectionStart=t.selectionEnd=t.value.length;
+}
+function editHistory(m){
+  const list=[...(m.hist||[]).map(h=>({...h,cur:false})),{text:m.text,ts:m.edited,cur:true}].reverse();
+  modal('Edit history',...list.map(v=>{const r=E('div','ehist'+(v.cur?' cur':''));r.append(E('small',0,(v.cur?'Now • ':'')+new Date(v.ts).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})),msgText(v.text));return r}));
 }
 /* ---------- Install as an app (own window, taskbar/desktop icon, no browser bars) ---------- */
 let installEv=null;
@@ -708,6 +784,7 @@ function render(){
       if(c.roles&&c.roles.length)d.title='Only: '+c.roles.map(r=>(S.roles[r]||{name:r}).name).join(', ');
       if(P('channels')){
         const menu=e=>ctx(e,[c.name,['Rename channel',()=>{const n=prompt('New channel name',c.name);if(n)tx({t:'renamech',id:c.id,name:n})}],
+          ...(me.role=='admin'&&c.type=='text'?[[c.photos?'🚫 Stop allowing photos':'🖼 Allow photos',()=>tx({t:'chphotos',id:c.id,on:!c.photos})]]:[]),
           ...(c.id!='open'?[['Who can enter…',()=>chAccess(c)],['Delete channel',()=>confirm('Delete "'+c.name+'"? Its messages will be lost.')&&tx({t:'delch',id:c.id}),'dng']]:[])]);
         d.oncontextmenu=menu;d.append(more(menu));dg(d,{kind:'ch',id:c.id});
       }
@@ -741,6 +818,7 @@ function render(){
     const ed=E('button','p','Edit layout');ed.onclick=()=>{bkEdit=true;bkLocal=JSON.parse(JSON.stringify(S.bk||bkDef()));bkSel=null;bkPen=null;render()};
     ta.append(cl,ed);
   }
+  syncAttach();
   $('#msgs').classList.toggle('hide',!txt);$('#send').classList.toggle('hide',!txt);$('#vbox').classList.toggle('hide',!!txt||!!brk||!cur);$('#bbox').classList.toggle('hide',!brk);
   if(brk)drawBracket();else if(cur&&!txt)panel();
   // members, grouped by role (Admin first, Default last, Banned only visible to moderators)
@@ -879,11 +957,23 @@ $('#txt').addEventListener('keydown',e=>{
 const txtFit=()=>{const i=$('#txt');i.style.height='auto';i.style.height=Math.min(i.scrollHeight,140)+'px'};
 $('#txt').addEventListener('input',txtFit);
 $('#txt').addEventListener('keydown',e=>{
+  if(e.key=='ArrowUp'&&!$('#txt').value&&!(mq&&$('#mbox'))){const mine=[...document.querySelectorAll('#msgs .m')].filter(d=>d._m&&d._m.key==S.me.key).pop();if(mine){e.preventDefault();editMsg(mine)}return}   // ↑ in an empty box: edit your last message
   if(e.key!='Enter'||e.shiftKey||e.isComposing||mq&&$('#mbox'))return;   // (Enter in the @ list picks a name)
   if(matchMedia('(pointer:coarse)').matches)return;   // phones: Enter is a new line, tap Send to send (like Discord mobile)
   e.preventDefault();$('#send').requestSubmit();
 });
-$('#send').onsubmit=e=>{e.preventDefault();const i=$('#txt');if(i.value.trim())tx({t:'chat',ch:cur.id,text:i.value});i.value='';txtFit()};
+$('#attb').onclick=()=>$('#attf').click();
+$('#attf').onchange=e=>{attach([...e.target.files]);e.target.value=''};
+$('#txt').addEventListener('paste',e=>{const fs=[...(e.clipboardData||{}).files||[]].filter(f=>/^image\//.test(f.type));if(fs.length&&cur&&cur.photos){e.preventDefault();attach(fs)}});   // paste a copied picture
+$('#msgs').addEventListener('dragover',e=>{if(cur&&cur.photos)e.preventDefault()});
+$('#msgs').addEventListener('drop',e=>{if(!(cur&&cur.photos))return;e.preventDefault();attach([...e.dataTransfer.files])});
+$('#send').onsubmit=e=>{
+  e.preventDefault();const i=$('#txt');
+  if(pend.some(p=>p.busy))return toast('Wait for the photo to finish uploading');
+  const imgs=pend.map(p=>p.id);
+  if(i.value.trim()||imgs.length)tx({t:'chat',ch:cur.id,text:i.value,imgs});
+  i.value='';txtFit();pend=[];drawPend();
+};
 
 /* ---------- Drag and drop (channels, categories) ---------- */
 let drag=null;const unfold=new Set();   // member groups are collapsed until opened (every time the app starts)
