@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
 const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
-const BUILD = '2026-09-26-dm';   // must match BUILD in public/index.html (the page warns the admin when they differ)
+const BUILD = '2026-09-26-appname';   // must match BUILD in public/index.html (the page warns the admin when they differ)
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
@@ -119,6 +119,14 @@ function seedAdmin() {
 
 const app = express();
 app.use(express.json({ limit: '10kb' }));
+// The installed app's name follows the name the admin set (Settings → Appearance → App name)
+app.get('/app/manifest.json', (req, res) => {
+  let m = {};
+  try { m = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'app', 'manifest.json'), 'utf8')); } catch {}
+  const n = appName();
+  m.name = n; m.short_name = n.length > 12 ? n.split(/\s+/)[0].slice(0, 12) : n; m.description = n + ' - voice and text chat';
+  res.set('Cache-Control', 'no-cache').type('application/manifest+json').send(JSON.stringify(m));
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- Appearance (admin): background picture, logo, and the colour of the main (red) buttons ----
@@ -126,7 +134,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 const THEME_DIR = process.env.DATA_DIR || __dirname;
 const themeFile = w => path.join(THEME_DIR, 'theme-' + w);
 const THEME_DEFAULT = { bg: path.join(__dirname, 'public', 'bg.jpg'), logo: path.join(__dirname, 'public', 'logo.png'), bracket: path.join(__dirname, 'public', 'bracket.jpg') };
-const themeOut = () => ({ btn: (db.theme && db.theme.btn) || '', v: (db.theme && db.theme.v) || 0 });
+const appName = () => (db.theme && db.theme.name) || 'Hashira VRaid';
+const themeOut = () => ({ btn: (db.theme && db.theme.btn) || '', v: (db.theme && db.theme.v) || 0, name: appName() });
 app.get('/theme/:w(bg|logo|bracket)', (req, res) => {
   const w = req.params.w, t = db.theme || {};
   res.set('Cache-Control', 'no-cache');
@@ -154,11 +163,13 @@ app.delete('/api/theme/:w(bg|logo|bracket)', (req, res) => {   // back to the or
 // Only in channels where the admin allowed photos. Files live next to data.json in "uploads".
 const UP_DIR = path.join(process.env.DATA_DIR || __dirname, 'uploads');
 try { fs.mkdirSync(UP_DIR, { recursive: true }); } catch {}
-const IMG_DAYS = 5, IMG_MAX = 2 * 1024 * 1024 + 64 * 1024, IMG_PER_MSG = 4;   // 2 MB per photo (the page shrinks bigger ones before sending)
+const IMG_DAYS = 5, IMG_PER_MSG = 4, IMG_HARD = 50 * 1024 * 1024;   // photos in channels AND direct messages are deleted after 5 days
+const imgMaxMB = () => Number((db.settings || {}).imgMaxMB) || 2;   // set by the admin (Settings → Photo upload limit); the page shrinks bigger photos to fit
+const imgMax = () => Math.round(imgMaxMB() * 1024 * 1024) + 64 * 1024;
 const IMG_EXT = /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|heic|heif|tiff?|ico)$/i;
 const upFile = id => path.join(UP_DIR, id);
 const sessionUser = req => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && U(k) && !db.banned[k] ? k : null; };
-app.post('/api/upload', express.raw({ type: () => true, limit: IMG_MAX }), (req, res) => {
+app.post('/api/upload', express.raw({ type: () => true, limit: IMG_HARD }), (req, res) => {
   const k = sessionUser(req);
   if (!k) return res.sendStatus(401);
   const c = chan(String(req.query.ch || ''));
@@ -167,6 +178,7 @@ app.post('/api/upload', express.raw({ type: () => true, limit: IMG_MAX }), (req,
   const type = String(req.headers['content-type'] || '').toLowerCase(), name = decodeURIComponent(String(req.headers['x-name'] || ''));
   if (!type.startsWith('image/') && !IMG_EXT.test(name)) return res.status(400).json({ error: 'Only pictures can be sent' });
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Empty file' });
+  if (req.body.length > imgMax()) return res.status(413).json({ error: 'Photo is too big (max ' + imgMaxMB() + ' MB)' });
   const mine = Object.values(db.uploads || {}).filter(x => x.by === k && !x.msg && Date.now() - x.ts < 3600e3).length;
   if (mine >= 12) return res.status(429).json({ error: 'Too many pictures waiting to be sent' });
   const id = crypto.randomBytes(12).toString('hex');
@@ -347,7 +359,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {}, notifs: db.users[w.key].notifs || [] },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dms: dmsFor(w.key), dl: process.env.DESKTOP_APP_URL || '', build: BUILD, bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dms: dmsFor(w.key), dl: process.env.DESKTOP_APP_URL || '', build: BUILD, imgMax: imgMaxMB(), bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -563,6 +575,11 @@ function handle(w, m) {
       db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !roles.length && !!m.open, roles, cat: db.cats.some(x => x.id === m.cat) ? m.cat : '' });
       done(); break;
     }
+    case 'imgmax': {   // admin: largest photo size in MB (0.5 - 25)
+      const mb = Math.round(Number(m.mb) * 10) / 10;
+      if (!adm || !(mb >= 0.5 && mb <= 25)) break;
+      db.settings = db.settings || {}; db.settings.imgMaxMB = mb; done(); break;
+    }
     case 'chphotos': {   // admin: allow or stop pictures in a text channel
       const c = chan(m.id);
       if (!adm || !c || c.type !== 'text') break;
@@ -658,6 +675,11 @@ function handle(w, m) {
       db.msgs[c.id] = db.msgs[c.id].filter(x => x !== target); dropImages(target.imgs); save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'del', ch: c.id, id: m.id }));
       break;
+    }
+    case 'appname': {   // admin: the name of the app (sidebar, login screen, browser tab, installed app)
+      const n = String(m.name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (!adm || n.length < 2) break;
+      db.theme = db.theme || {}; db.theme.name = n; done(); break;
     }
     case 'btncolor': {   // admin: colour of the main buttons (Login, Send, …); empty = back to the original red
       if (!adm) break;

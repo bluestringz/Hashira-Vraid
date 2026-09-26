@@ -58,6 +58,7 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .bktool{display:flex;flex-wrap:wrap;gap:8px;align-items:center;width:100%;max-width:1400px;background:var(--pan);border:1px solid var(--bd);border-radius:10px;padding:8px}
 .bktool select{width:auto}.bkc input[type=range]{width:110px;padding:0;border:0;background:none}.bkc{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mut)}.bkc input[type=color]{width:32px;height:26px}
 .dmnew{margin-left:auto;padding:0 7px;font-size:14px;line-height:18px}
+.dmlist{overflow-y:auto;overflow-x:hidden;position:relative}
 .dmi{gap:8px}.dmi .av{width:26px;height:26px;font-size:12px;flex:none}.dmt{display:flex;flex-direction:column;min-width:0;flex:1}.dmt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dmt small{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dmi.unr .dmt span{font-weight:700;color:var(--tx)}
 .dmi .dmx{opacity:0;padding:0 5px;font-size:11px}.dmi:hover .dmx{opacity:1}.dmempty{display:block;color:var(--mut);font-size:11px;padding:2px 10px 6px}
@@ -71,6 +72,9 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .vm .av{width:20px;height:20px;font-size:10px}.av.big{width:64px;height:64px;font-size:24px}
 .av{transition:box-shadow .1s}.av.speaking{box-shadow:0 0 0 3px #3ba55d}.vm .av.speaking{box-shadow:0 0 0 2px #3ba55d}
 .ico{position:relative;display:inline-block;margin-left:2px}
+.micico{line-height:0;vertical-align:-.15em;color:var(--tx)}.micico svg{display:block;width:1.15em;height:1.15em}.btns .micico svg{width:1.35em;height:1.35em}
+.ico.micico.off::after{left:0;right:0}
+.ico.micico.off{color:#ff6b6b}
 .ico.off::after{content:'';position:absolute;left:-2px;right:-2px;top:50%;height:2px;background:var(--red);transform:rotate(-45deg);border-radius:1px}
 .me{padding:10px;border-top:1px solid var(--bd);display:grid;gap:8px}
 .me .r{display:flex;gap:6px;align-items:center}
@@ -203,11 +207,12 @@ input[type=color]{width:48px;height:36px;padding:2px;border-radius:6px;cursor:po
   #modal>div{max-height:88vh;max-height:88dvh}
   #toast{bottom:calc(24px + env(safe-area-inset-bottom))}
 }
+.brand{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
 </style></head><body>
 
 <div id="login"><form class="card" onsubmit="event.preventDefault();auth('login')">
   <img class="tlogo" src="/theme/logo" alt="Hashira Esports">
-  <h1>Hashira VRaid</h1>
+  <h1 class="appname">Hashira VRaid</h1>
   <input id="u" placeholder="Username" autocomplete="username">
   <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
   <div id="err"></div>
@@ -217,7 +222,7 @@ input[type=color]{width:48px;height:36px;padding:2px;border-radius:6px;cursor:po
 <div id="app" class="hide">
   <div id="scrim"></div>
   <aside id="side">
-    <div class="hd"><img class="tlogo" src="/theme/logo" alt=""><span class="brand">Hashira VRaid</span></div>
+    <div class="hd"><img class="tlogo" src="/theme/logo" alt=""><span class="brand appname">Hashira VRaid</span></div>
     <div class="list" id="chl"></div>
     <div class="me" id="me"></div>
   </aside>
@@ -291,7 +296,7 @@ function on(m){
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
     showUnread();
     notifs=S.me.notifs||[];checkBuild();
-    render();syncPeers();repaintNames();applyTheme(m.theme);
+    render();syncPeers();repaintNames();applyTheme(m.theme);fitBrand();
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
     reconcile();
@@ -461,13 +466,14 @@ function drawPend(){
   row.replaceChildren();
   pend.forEach(p=>{const t=E('div','pt'+(p.busy?' busy':''));const i=E('img');i.src=p.url;const x=E('button','x','✕');x.title='Remove';x.onclick=()=>{pend=pend.filter(q=>q!==p);drawPend()};t.append(i,x);if(p.busy)t.append(E('small',0,'Uploading…'));row.append(t)});
 }
-const IMG_LIMIT=2*1024*1024;   // photos bigger than 2 MB are shrunk in the browser before upload
+const imgMB=()=>(S&&S.imgMax)||2,IMG_LIMIT_B=()=>imgMB()*1024*1024;   // photos bigger than the admin's limit are shrunk in the browser before upload
 async function shrinkImg(f){
+  const IMG_LIMIT=IMG_LIMIT_B();
   if(f.size<=IMG_LIMIT)return f;
-  if(/gif/i.test(f.type))throw new Error('GIF is too big (max 2 MB) — moving GIFs cannot be shrunk');
-  let bmp;try{bmp=await createImageBitmap(f)}catch{throw new Error((f.name||'Photo')+' is too big (max 2 MB) and this picture type cannot be shrunk here')}
+  if(/gif/i.test(f.type))throw new Error('GIF is too big (max '+imgMB()+' MB) — moving GIFs cannot be shrunk');
+  let bmp;try{bmp=await createImageBitmap(f)}catch{throw new Error((f.name||'Photo')+' is too big (max '+imgMB()+' MB) and this picture type cannot be shrunk here')}
   const cv=document.createElement('canvas'),cx=cv.getContext('2d');
-  let scale=Math.min(1,2560/Math.max(bmp.width,bmp.height));
+  let scale=Math.min(1,(imgMB()>=4?4096:2560)/Math.max(bmp.width,bmp.height));   // bigger limit = sharper photos allowed
   for(let round=0;round<7;round++){
     cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));
     cx.fillStyle='#000';cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);
@@ -536,10 +542,10 @@ let installEv=null;
 const isApp=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone||/Electron/.test(navigator.userAgent);   // installed web app or the Windows app
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEv=e});   // Chrome/Edge: keep it for our own Install button
-addEventListener('appinstalled',()=>{installEv=null;toast('Installed! Open Hashira VRaid from your desktop or Start menu.')});
+addEventListener('appinstalled',()=>{installEv=null;toast('Installed! Open '+appName+' from your desktop or Start menu.')});
 async function installApp(){
   if(installEv){installEv.prompt();const r=await installEv.userChoice.catch(()=>null);if(r&&r.outcome=='accepted')installEv=null;return}
-  modal('Install the app',E('small',0,'Chrome or Edge on a computer: click the install icon at the right end of the address bar (a small screen with an arrow), or open the ⋮ menu and choose "Install Hashira VRaid" / "Apps > Install this site as an app".'),
+  modal('Install the app',E('small',0,'Chrome or Edge on a computer: click the install icon at the right end of the address bar (a small screen with an arrow), or open the ⋮ menu and choose "Install '+appName+'" / "Apps > Install this site as an app".'),
     E('small',0,'Android (Chrome): ⋮ menu > "Add to Home screen" or "Install app".'),
     E('small',0,'iPhone/iPad (Safari): Share button > "Add to Home Screen".'));
 }
@@ -737,9 +743,14 @@ addEventListener('resize',()=>{if(cur&&cur.type=='bracket')bkFit()});
 document.fonts&&document.fonts.ready.then(()=>{if(cur&&cur.type=='bracket')bkFit()});
 
 /* ---------- Appearance (set by the admin, same for everyone) ---------- */
-let themeV=null;
+let themeV=null,appName='Hashira VRaid';
+function fitBrand(){   // long app names: one line, slightly smaller text instead of wrapping
+  requestAnimationFrame(()=>{const b=document.querySelector('.brand');if(!b)return;b.style.fontSize='';let f=100;while(b.scrollWidth>b.clientWidth+1&&f>60){f-=5;b.style.fontSize=f+'%'}});
+}
 function applyTheme(t){
   if(!t)return;
+  if(t.name&&t.name!==appName){appName=t.name;document.querySelectorAll('.appname').forEach(e=>e.textContent=appName);showUnread();fitBrand()}
+  else if(t.name)document.querySelectorAll('.appname').forEach(e=>{if(e.textContent!==appName)e.textContent=appName});
   if(t.btn)document.documentElement.style.setProperty('--btn',t.btn);else document.documentElement.style.removeProperty('--btn');
   if(t.v!==themeV){
     const first=themeV===null;themeV=t.v;if(first&&!t.v)return;   // nothing changed from the originals
@@ -769,9 +780,12 @@ function appearance(){
   col.onchange=()=>tx({t:'btncolor',color:col.value});
   const cr=E('button',0,'Reset to original red');cr.onclick=()=>{tx({t:'btncolor',color:''});col.value='#e11d2e'};
   const crow=E('div','row');crow.append(col,prev,cr);
-  modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
+  const nm=E('input');nm.maxLength=40;nm.value=appName;const ns=E('button','p','Save name');
+  ns.onclick=()=>{const v=nm.value.trim();if(v.length<2)return toast('Name is too short');tx({t:'appname',name:v});toast('App name saved')};
+  nm.onkeydown=e=>{if(e.key=='Enter')ns.click()};const nrow=E('div','row');nrow.append(nm,ns);
+  modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),E('label',0,'App name'),nrow,...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
-const BUILD='2026-09-26-dm';   // must match BUILD in server.js
+const BUILD='2026-09-26-appname';   // must match BUILD in server.js
 let buildWarned=false;
 function checkBuild(){   // admin only: the page and the server are from different updates (usually server.js was not uploaded)
   if(buildWarned||S.me.role!='admin'||S.build===BUILD)return;buildWarned=true;
@@ -779,6 +793,7 @@ function checkBuild(){   // admin only: the page and the server are from differe
     E('small',0,'Server: '+(S.build||'older version')+' • Page: '+BUILD));
 }
 /* ---------- Direct messages (private chat between two people) ---------- */
+let dmScroll=0;
 const dmKey=k=>'dm:'+[S.me.key,k].sort().join('|');
 function dmObj(k){const u=S.users.find(x=>x.key==k)||{name:k};return {id:dmKey(k),name:u.name,type:'text',dm:true,with:k,photos:true}}
 function openDM(k){if(k==S.me.key)return;pick(dmObj(k));setTimeout(()=>$('#txt')&&$('#txt').focus(),50)}
@@ -788,8 +803,16 @@ function newDM(){   // pick someone to message
     const r=E('div','mo');r.append(avEl(u.key,u.name),E('span',0,u.name));if(u.on)r.append(E('small',0,'online'));r.onclick=()=>{close();openDM(u.key)};list.append(r)})};
   q.oninput=draw;draw();modal('New message',q,list);setTimeout(()=>q.focus(),50);
 }
+function photoLimit(){   // admin: type the largest photo size in MB
+  const i=E('input');i.type='number';i.min=0.5;i.max=25;i.step=0.5;i.value=imgMB();
+  const sv=E('button','p','Save'),st=E('small');
+  sv.onclick=()=>{const v=Math.round(parseFloat(i.value)*10)/10;if(!(v>=0.5&&v<=25))return st.textContent='Type a number from 0.5 to 25';tx({t:'imgmax',mb:v});close();toast('Photo limit set to '+v+' MB')};
+  i.onkeydown=e=>{if(e.key=='Enter')sv.click()};
+  modal('Photo upload limit',E('small',0,'Largest size of one photo, in MB. Bigger photos are shrunk automatically before sending (except moving GIFs). Photos are deleted after 5 days, in channels and direct messages.'),i,st,sv);
+  setTimeout(()=>{i.focus();i.select()},50);
+}
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
-function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0)+(typeof notifs!='undefined'?notifs.filter(x=>!x.read).length:0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
+function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0)+(typeof notifs!='undefined'?notifs.filter(x=>!x.read).length:0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+appName;const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
   if(!document.hidden&&cur&&unread[cur.id]){delete unread[cur.id];tx({t:'read',ch:cur.id});showUnread()}
 });
@@ -815,6 +838,7 @@ function render(){
     const nb=E('button','x dmnew','+');nb.title='New message';nb.onclick=e=>{e.stopPropagation();newDM()};s.append(nb);
     s.onclick=e=>{if(e.target.closest('button'))return;cfold.has('~dm')?cfold.delete('~dm'):cfold.add('~dm');try{localStorage.cfold=JSON.stringify([...cfold])}catch{};render()};
     L.append(s);
+    const dl=E('div','dmlist');L.append(dl);   // own scroll area: shows about 5 conversations, scroll for the rest
     (S.dms||[]).forEach(dm=>{
       const u=S.users.find(x=>x.key==dm.with);if(!u)return;
       const here=cur&&cur.id==dm.id,un=here?0:unread[dm.id]||0;
@@ -823,13 +847,18 @@ function render(){
       const t=E('div','dmt');t.append(E('span',0,u.name),E('small',0,dm.preview));d.append(t);
       if(un)d.append(E('span','badge',un>99?'99+':String(un)));
       const hide=E('button','x dmx','✕');hide.title='Remove from list';hide.onclick=e=>{e.stopPropagation();if(here)pick(S.channels[0]);tx({t:'dmhide',ch:dm.id})};d.append(hide);
-      d.onclick=()=>pick(dmObj(dm.with));d.oncontextmenu=e=>userMenu(e,u);L.append(d);
+      d.onclick=()=>pick(dmObj(dm.with));d.oncontextmenu=e=>userMenu(e,u);dl.append(d);
     });
+    requestAnimationFrame(()=>{   // height = first 5 conversations; keep the scroll position between redraws
+      const it=[...dl.children];dl.style.maxHeight=it.length>5?(it[5].offsetTop-it[0].offsetTop)+'px':'';dl.scrollTop=dmScroll;
+    });
+    dl.onscroll=()=>{dmScroll=dl.scrollTop};
     if(!(S.dms||[]).length&&!cfold.has('~dm'))L.append(E('small','dmempty','No messages yet. Right-click a member → Message, or press +.'));
   }
   [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
     const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
     if(cat.id&&!chs.length&&!P('channels'))return;
+    if(!cat.id&&!chs.length&&S.cats.length)return;   // the plain "Channels" group shows only when it has channels (its menu actions are on every category too)
     const ck=cat.id||'~main',folded=cfold.has(ck);
     const s=E('div','sec'+(folded?' fold':''));s.append(E('span',0,cat.name));s.title='Click to collapse or expand';
     s.onclick=e=>{if(e.target.closest('button'))return;folded?cfold.delete(ck):cfold.add(ck);try{localStorage.cfold=JSON.stringify([...cfold])}catch{};render()};
@@ -1069,7 +1098,9 @@ function dz(el,f,uf){   // f: reorder handler (channels/categories), uf: drop ha
 }
 
 /* ---------- Settings, mute / deafen, speaking indicator ---------- */
-const ico=(c,off)=>E('span','ico'+(off?' off':''),c);
+// Microphone icon (drawn, not an emoji): rounded capsule on a U-shaped stand. Takes the text colour, red slash when off.
+const MIC_SVG='<svg viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true"><rect x="7.2" y="1.5" width="9.6" height="14" rx="4.8" fill="currentColor"/><path d="M4.6 10.8v.6a7.4 7.4 0 0 0 14.8 0v-.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M12 18.9v3M8.6 22.2h6.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>';
+const ico=(c,off)=>{const s=E('span','ico'+(off?' off':''));if(c=='🎤'){s.classList.add('micico');s.innerHTML=MIC_SVG}else s.textContent=c;return s};
 const vsI=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{},d=s.d||v.d,mu=d||s.m||v.m,a=d?[ico('🎤',1),ico('🎧',1)]:mu?[ico('🎤',1)]:[];if(lmute.has(k)){const l=ico('🔊',1);l.title='Muted for you';a.push(l)}if(s.cam)a.push(ico('📷'));if(s.scr)a.push(ico('🖥'));return a};
 const svm=()=>!!(S&&S.me.sv&&S.me.sv.m),svd=()=>!!(S&&S.me.sv&&S.me.sv.d);
 // "Mute for me": only this browser stops hearing that person; everyone else still hears them. Saved in this browser.
@@ -1121,7 +1152,8 @@ function settings(){
     if(S.dl){const dw=E('button','p','Download Windows app');dw.onclick=()=>open(S.dl,'_blank');items.push(dw)}   // link set by the admin in Render (DESKTOP_APP_URL)
     const ia=E('button',S.dl?'':'p','Install desktop app');ia.onclick=installApp;items.push(ia);
   }
-  if(me.role=='admin'){const ap=E('button',0,'Appearance (background, logo, button colour)');ap.onclick=appearance;items.push(ap)}
+  if(me.role=='admin'){const ap=E('button',0,'Appearance (background, logo, button colour)');ap.onclick=appearance;items.push(ap);
+    const pl=E('button',0,'Photo upload limit ('+imgMB()+' MB)');pl.onclick=photoLimit;items.push(pl)}
   const cp=E('button',0,'Change password');cp.onclick=passModal;items.push(cp);
   const au=E('button',0,'Audio setup (microphone, speakers, connection test)');au.onclick=audioSetup;items.push(au);
   items.push(E('label',0,'Muted for me (only you stop hearing them)'));
