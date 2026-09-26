@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
 const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
-const BUILD = '2026-09-26-appname';   // must match BUILD in public/index.html (the page warns the admin when they differ)
+const BUILD = '2026-09-26-icons';   // must match BUILD in public/index.html (the page warns the admin when they differ)
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
@@ -125,7 +125,20 @@ app.get('/app/manifest.json', (req, res) => {
   try { m = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'app', 'manifest.json'), 'utf8')); } catch {}
   const n = appName();
   m.name = n; m.short_name = n.length > 12 ? n.split(/\s+/)[0].slice(0, 12) : n; m.description = n + ' - voice and text chat';
+  const v = (db.theme && db.theme.v) || 0, t = db.theme || {};
+  if (t.icon192Type) m.icons = [   // the admin's logo as the app icon (taskbar, title bar, desktop shortcut)
+    { src: '/theme/icon192?v=' + v, sizes: '192x192', type: 'image/png' }, { src: '/theme/icon512?v=' + v, sizes: '512x512', type: 'image/png' },
+    { src: '/theme/icon512?v=' + v, sizes: '512x512', type: 'image/png', purpose: 'maskable' }];
   res.set('Cache-Control', 'no-cache').type('application/manifest+json').send(JSON.stringify(m));
+});
+// The page itself starts with the current app name (tab title, login screen, sidebar) — no old name flashing first
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+app.get(['/', '/index.html'], (req, res) => {
+  let html;
+  try { html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8'); } catch { return res.sendStatus(500); }
+  const n = esc(appName());
+  html = html.replace('<title>Hashira VRaid</title>', '<title>' + n + '</title>').replace(/(class="[^"]*appname[^"]*">)Hashira VRaid</g, '$1' + n + '<');
+  res.set('Cache-Control', 'no-cache').type('html').send(html);
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -133,10 +146,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Pictures are kept as files next to data.json (the persistent disk), not inside it, so saving chat stays fast.
 const THEME_DIR = process.env.DATA_DIR || __dirname;
 const themeFile = w => path.join(THEME_DIR, 'theme-' + w);
-const THEME_DEFAULT = { bg: path.join(__dirname, 'public', 'bg.jpg'), logo: path.join(__dirname, 'public', 'logo.png'), bracket: path.join(__dirname, 'public', 'bracket.jpg') };
+const THEME_DEFAULT = { bg: path.join(__dirname, 'public', 'bg.jpg'), logo: path.join(__dirname, 'public', 'logo.png'), bracket: path.join(__dirname, 'public', 'bracket.jpg'),
+  icon192: path.join(__dirname, 'public', 'app', 'icon-192.png'), icon512: path.join(__dirname, 'public', 'app', 'icon-512.png') };   // icons: square app icons made from the logo
 const appName = () => (db.theme && db.theme.name) || 'Hashira VRaid';
 const themeOut = () => ({ btn: (db.theme && db.theme.btn) || '', v: (db.theme && db.theme.v) || 0, name: appName() });
-app.get('/theme/:w(bg|logo|bracket)', (req, res) => {
+app.get('/theme/:w(bg|logo|bracket|icon192|icon512)', (req, res) => {
   const w = req.params.w, t = db.theme || {};
   res.set('Cache-Control', 'no-cache');
   if (t[w + 'Type'] && fs.existsSync(themeFile(w))) return res.type(t[w + 'Type']).sendFile(themeFile(w));
@@ -144,7 +158,7 @@ app.get('/theme/:w(bg|logo|bracket)', (req, res) => {
 });
 app.get('/api/theme', (req, res) => res.json(themeOut()));   // for the login screen (before signing in)
 const adminFromReq = (req, w) => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && U(k) && (isAdm(k) || (w === 'bracket' && P(k).includes('bracket'))) ? k : null; };   // the bracket picture: also people with the bracket permission
-app.post('/api/theme/:w(bg|logo|bracket)', express.raw({ type: 'image/*', limit: '8mb' }), (req, res) => {
+app.post('/api/theme/:w(bg|logo|bracket|icon192|icon512)', express.raw({ type: 'image/*', limit: '8mb' }), (req, res) => {
   if (!adminFromReq(req, req.params.w)) return res.sendStatus(403);
   const type = String(req.headers['content-type'] || '');
   if (!/^image\/(png|jpeg|webp|gif)$/.test(type) || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Use a PNG, JPG, WebP or GIF picture' });
@@ -152,7 +166,7 @@ app.post('/api/theme/:w(bg|logo|bracket)', express.raw({ type: 'image/*', limit:
   db.theme = db.theme || {}; db.theme[req.params.w + 'Type'] = type; db.theme.v = Date.now();
   console.log('[theme] admin changed the', req.params.w); save(); push(); res.json({ ok: true });
 });
-app.delete('/api/theme/:w(bg|logo|bracket)', (req, res) => {   // back to the original picture
+app.delete('/api/theme/:w(bg|logo|bracket|icon192|icon512)', (req, res) => {   // back to the original picture
   if (!adminFromReq(req, req.params.w)) return res.sendStatus(403);
   try { fs.unlinkSync(themeFile(req.params.w)); } catch {}
   db.theme = db.theme || {}; delete db.theme[req.params.w + 'Type']; db.theme.v = Date.now();

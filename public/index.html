@@ -2,8 +2,8 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Hashira VRaid</title>
-<link rel="icon" id="favi" href="/theme/logo">
-<link rel="manifest" href="/app/manifest.json"><meta name="theme-color" content="#10070b"><link rel="apple-touch-icon" href="/app/icon-192.png">
+<link rel="icon" id="favi" href="/theme/icon192">
+<link rel="manifest" href="/app/manifest.json"><meta name="theme-color" content="#10070b"><link rel="apple-touch-icon" id="appicon" href="/theme/icon192">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
 <style>
 :root{--red:#e11d2e;--tx:#f3eef0;--mut:#a89aa0;--pan:rgba(16,7,11,.76);--pan2:rgba(255,255,255,.07);--bd:rgba(255,255,255,.13);--ov:rgba(6,2,5,.66);--solid:#1a0b10}
@@ -756,10 +756,21 @@ function applyTheme(t){
     const first=themeV===null;themeV=t.v;if(first&&!t.v)return;   // nothing changed from the originals
     const q='?v='+t.v;
     document.body.style.backgroundImage=`linear-gradient(var(--ov),var(--ov)),url(/theme/bg${q})`;
-    document.querySelectorAll('img.tlogo').forEach(i=>i.src='/theme/logo'+q);$('#favi').href='/theme/logo'+q;
+    document.querySelectorAll('img.tlogo').forEach(i=>i.src='/theme/logo'+q);$('#favi').href='/theme/icon192'+q;$('#appicon').href='/theme/icon192'+q;
   }
 }
 fetch('/api/theme').then(r=>r.json()).then(applyTheme).catch(()=>{});   // login screen too
+async function makeIcons(file){   // square app icons (192 and 512 px) from the new logo, on the app's dark background
+  const bmp=await createImageBitmap(file);
+  for(const sz of [192,512]){
+    const c=document.createElement('canvas');c.width=c.height=sz;const x=c.getContext('2d');
+    x.fillStyle='#10070b';x.fillRect(0,0,sz,sz);
+    const pad=sz*0.12,r=Math.min((sz-2*pad)/bmp.width,(sz-2*pad)/bmp.height),w=bmp.width*r,h=bmp.height*r;
+    x.imageSmoothingQuality='high';x.drawImage(bmp,(sz-w)/2,(sz-h)/2,w,h);
+    const b=await new Promise(res=>c.toBlob(res,'image/png'));
+    await fetch('/api/theme/icon'+sz,{method:'POST',headers:{'Content-Type':'image/png',Authorization:'Bearer '+tok},body:b});
+  }
+}
 function appearance(){
   const q='?v='+(themeV||0);
   const pic=(w,label)=>{
@@ -770,8 +781,9 @@ function appearance(){
     f.onchange=async()=>{const file=f.files[0];if(!file)return;if(file.size>8e6)return st.textContent='Picture is too big (max 8 MB)';
       st.textContent='Uploading…';
       const r=await fetch('/api/theme/'+w,{method:'POST',headers:{'Content-Type':file.type,Authorization:'Bearer '+tok},body:file}).catch(()=>null);
+      if(r&&r.ok&&w=='logo'){st.textContent='Making the app icon…';await makeIcons(file).catch(()=>{})}
       const j=r?await r.json().catch(()=>({})):{};st.textContent=r&&r.ok?'✓ Saved. Everyone sees it now.':(j.error||'Could not upload');if(r&&r.ok)setTimeout(appearance,400)};
-    rs.onclick=async()=>{if(!confirm('Go back to the original '+label+'?'))return;await fetch('/api/theme/'+w,{method:'DELETE',headers:{Authorization:'Bearer '+tok}}).catch(()=>{});setTimeout(appearance,400)};
+    rs.onclick=async()=>{if(!confirm('Go back to the original '+label+'?'))return;for(const x of w=='logo'?['icon192','icon512','logo']:[w])await fetch('/api/theme/'+x,{method:'DELETE',headers:{Authorization:'Bearer '+tok}}).catch(()=>{});setTimeout(appearance,400)};
     const row=E('div','row');row.append(ch,rs);return [E('label',0,label[0].toUpperCase()+label.slice(1)),img,row,f,st];
   };
   const col=E('input');col.type='color';col.value=(S.theme&&S.theme.btn)||'#e11d2e';
@@ -785,7 +797,7 @@ function appearance(){
   nm.onkeydown=e=>{if(e.key=='Enter')ns.click()};const nrow=E('div','row');nrow.append(nm,ns);
   modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),E('label',0,'App name'),nrow,...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
-const BUILD='2026-09-26-appname';   // must match BUILD in server.js
+const BUILD='2026-09-26-icons';   // must match BUILD in server.js
 let buildWarned=false;
 function checkBuild(){   // admin only: the page and the server are from different updates (usually server.js was not uploaded)
   if(buildWarned||S.me.role!='admin'||S.build===BUILD)return;buildWarned=true;
