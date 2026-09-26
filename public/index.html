@@ -57,6 +57,11 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 .bksel button,.bktool button{font-size:12px;padding:4px 8px;white-space:nowrap}.bksel button.on,.bktool button.on{background:#ffd166;color:#000;border-color:#ffd166}
 .bktool{display:flex;flex-wrap:wrap;gap:8px;align-items:center;width:100%;max-width:1400px;background:var(--pan);border:1px solid var(--bd);border-radius:10px;padding:8px}
 .bktool select{width:auto}.bkc input[type=range]{width:110px;padding:0;border:0;background:none}.bkc{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mut)}.bkc input[type=color]{width:32px;height:26px}
+.dmnew{margin-left:auto;padding:0 7px;font-size:14px;line-height:18px}
+.dmi{gap:8px}.dmi .av{width:26px;height:26px;font-size:12px;flex:none}.dmt{display:flex;flex-direction:column;min-width:0;flex:1}.dmt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dmt small{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dmi.unr .dmt span{font-weight:700;color:var(--tx)}
+.dmi .dmx{opacity:0;padding:0 5px;font-size:11px}.dmi:hover .dmx{opacity:1}.dmempty{display:block;color:var(--mut);font-size:11px;padding:2px 10px 6px}
+.dmpick{max-height:50vh;overflow:auto;margin-top:8px}.dmpick .mo{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer}.dmpick .mo:hover{background:var(--pan2)}.dmpick .mo small{margin-left:auto;color:#3ba55d}.dmpick .av{width:24px;height:24px;font-size:11px}
 .ch .badge{margin-left:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .ch:hover,.ch.on{background:var(--pan2)}.ch.on{border-left:3px solid var(--red)}
 .ch span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -280,7 +285,7 @@ function on(m){
     const ns=S.me.sv||{};if(os){if(!!ns.m!=!!os.m)toast(ns.m?'A moderator muted you':'You can speak again');if(!!ns.d!=!!os.d)toast(ns.d?'A moderator deafened you':'You can hear again')}
     applyMic();syncAudio();
     $('#login').classList.add('hide');$('#app').classList.remove('hide');
-    const same=cur&&(cur.type=='bracket'?((cur.edit?bkCan():!!S.bk)?cur:null):S.channels.find(c=>c.id==cur.id));   // lost access to a bracket page: go to a channel
+    const same=cur&&(cur.dm?(S.users.some(u=>u.key==cur.with)?dmObj(cur.with):null):cur.type=='bracket'?((cur.edit?bkCan():!!S.bk)?cur:null):S.channels.find(c=>c.id==cur.id));   // lost access to a bracket page: go to a channel
     if(same)cur=same;else pick((!cur&&desired&&S.channels.find(c=>c.id==desired))||S.channels[0],true);   // after a refresh, open the voice channel you were in
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
@@ -297,6 +302,12 @@ function on(m){
     if(m.msg.key!=S.me.key){
       if(here&&!document.hidden)tx({t:'read',ch:m.ch});   // I am looking at it
       else{unread[m.ch]=(unread[m.ch]||0)+1;if(!here)render();showUnread()}
+    }
+    if(String(m.ch).startsWith('dm:')){   // keep my conversation list up to date
+      const other=m.ch.slice(3).split('|').find(k=>k!=S.me.key)||S.me.key;
+      S.dms=(S.dms||[]).filter(x=>x.id!=m.ch);S.dms.unshift({id:m.ch,with:other,last:m.msg.ts,preview:(m.msg.key==S.me.key?'You: ':'')+(m.msg.text||'📷 Photo').slice(0,60)});
+      if(m.msg.key!=S.me.key&&!(here&&!document.hidden)){sMention();const who=(S.users.find(u=>u.key==m.msg.key)||{name:m.msg.name}).name;toast('💬 '+who+': '+(m.msg.text||'📷 Photo').slice(0,60));deskNotify({fromName:who,text:m.msg.text||'📷 Photo'})}
+      render();
     }
   }
   else if(m.t=='peers')m.peers.forEach(k=>{if(pcs[k])closePeer(k);mk(k,true)});
@@ -760,12 +771,22 @@ function appearance(){
   const crow=E('div','row');crow.append(col,prev,cr);
   modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
-const BUILD='2026-09-26-shrink';   // must match BUILD in server.js
+const BUILD='2026-09-26-dm';   // must match BUILD in server.js
 let buildWarned=false;
 function checkBuild(){   // admin only: the page and the server are from different updates (usually server.js was not uploaded)
   if(buildWarned||S.me.role!='admin'||S.build===BUILD)return;buildWarned=true;
   modal('Update not complete',E('p',0,'The website page and the server are from different updates. Upload BOTH server.js and public/index.html to GitHub, then wait for Render to finish deploying and refresh this page.'),
     E('small',0,'Server: '+(S.build||'older version')+' • Page: '+BUILD));
+}
+/* ---------- Direct messages (private chat between two people) ---------- */
+const dmKey=k=>'dm:'+[S.me.key,k].sort().join('|');
+function dmObj(k){const u=S.users.find(x=>x.key==k)||{name:k};return {id:dmKey(k),name:u.name,type:'text',dm:true,with:k,photos:true}}
+function openDM(k){if(k==S.me.key)return;pick(dmObj(k));setTimeout(()=>$('#txt')&&$('#txt').focus(),50)}
+function newDM(){   // pick someone to message
+  const q=E('input');q.placeholder='Search a member…';const list=E('div','dmpick');
+  const draw=()=>{list.replaceChildren();S.users.filter(u=>u.key!=S.me.key&&!u.banned&&u.name.toLowerCase().includes(q.value.trim().toLowerCase())).sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).slice(0,30).forEach(u=>{
+    const r=E('div','mo');r.append(avEl(u.key,u.name),E('span',0,u.name));if(u.on)r.append(E('small',0,'online'));r.onclick=()=>{close();openDM(u.key)};list.append(r)})};
+  q.oninput=draw;draw();modal('New message',q,list);setTimeout(()=>q.focus(),50);
 }
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
 function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0)+(typeof notifs!='undefined'?notifs.filter(x=>!x.read).length:0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+'Hashira VRaid';const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
@@ -788,6 +809,23 @@ function render(){
   { // Tournament bracket menu at the top of the list
     if(S.bk){const b=E('div','ch brkm'+(cur&&cur.id==BRK.id?' on':''));b.append(E('span',0,'🏆 Tournament Bracket'));b.onclick=()=>pick(BRK);L.append(b)}
     if(bkCan()){const b=E('div','ch brkm'+(cur&&cur.id==BRKE.id?' on':''));b.append(E('span',0,'🛠 Bracket Editor'));b.title='Only Admin and Senior see this';b.onclick=()=>pick(BRKE);L.append(b)}
+  }
+  { // Direct messages (private inbox)
+    const s=E('div','sec'+(cfold.has('~dm')?' fold':''));s.append(E('span',0,'Direct Messages'));
+    const nb=E('button','x dmnew','+');nb.title='New message';nb.onclick=e=>{e.stopPropagation();newDM()};s.append(nb);
+    s.onclick=e=>{if(e.target.closest('button'))return;cfold.has('~dm')?cfold.delete('~dm'):cfold.add('~dm');try{localStorage.cfold=JSON.stringify([...cfold])}catch{};render()};
+    L.append(s);
+    (S.dms||[]).forEach(dm=>{
+      const u=S.users.find(x=>x.key==dm.with);if(!u)return;
+      const here=cur&&cur.id==dm.id,un=here?0:unread[dm.id]||0;
+      if(cfold.has('~dm')&&!here&&!un)return;
+      const d=E('div','ch dmi'+(here?' on':'')+(un?' unr':''));d.append(avEl(u.key,u.name));
+      const t=E('div','dmt');t.append(E('span',0,u.name),E('small',0,dm.preview));d.append(t);
+      if(un)d.append(E('span','badge',un>99?'99+':String(un)));
+      const hide=E('button','x dmx','✕');hide.title='Remove from list';hide.onclick=e=>{e.stopPropagation();if(here)pick(S.channels[0]);tx({t:'dmhide',ch:dm.id})};d.append(hide);
+      d.onclick=()=>pick(dmObj(dm.with));d.oncontextmenu=e=>userMenu(e,u);L.append(d);
+    });
+    if(!(S.dms||[]).length&&!cfold.has('~dm'))L.append(E('small','dmempty','No messages yet. Right-click a member → Message, or press +.'));
   }
   [{id:'',name:'Channels'},...S.cats].forEach(cat=>{
     const chs=S.channels.filter(c=>(c.cat||'')==cat.id);
@@ -843,9 +881,9 @@ function render(){
   r2.append(mic,hp,bl,th,st,lo);f.append(r1,r2);drawBell();
   // main
   const txt=cur&&cur.type=='text',brk=cur&&cur.type=='bracket';
-  $('#title').textContent=cur?(brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
+  $('#title').textContent=cur?(cur.dm?'💬 ':brk?'🏆 ':txt?'# ':'🔊 ')+cur.name:'';
   const ta=$('#topact');ta.replaceChildren();
-  if(me.role=='admin'&&txt){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
+  if(me.role=='admin'&&txt&&!cur.dm){const b=E('button',0,'Clear chat');b.onclick=()=>confirm('Delete ALL messages in # '+cur.name+'?')&&tx({t:'clear',ch:cur.id});ta.append(b)}
   if(bkCan()&&brk&&cur.edit&&!bkEdit){
     const cl=E('button',0,'Clear names');cl.onclick=()=>confirm('Remove ALL team names from the bracket?')&&tx({t:'bkclear'});
     const ed=E('button','p','Edit layout');ed.onclick=()=>{bkEdit=true;bkLocal=JSON.parse(JSON.stringify(S.bk||bkDef()));bkSel=null;bkPen=null;render()};
@@ -1181,6 +1219,7 @@ function userMenu(e,u){
   }else if(u.banned){
     if(me.role=='admin'&&u.role!='admin')it.push(['Unban',()=>tx({t:'unban',key:u.key})],null,['Delete account',()=>delUser(u),'dng']);
   }else{
+    it.push(['💬 Message',()=>openDM(u.key)],null);
     it.push('User volume (only for you)',volSlider(u.key),[lmute.has(u.key)?'Unmute for me':'Mute for me',()=>toggleLM(u.key)]);
     if(nickOk(u))it.push(null,['Change nickname…',()=>nickModal(u)]);
     if(canAssign(u))it.push(null,['Manage roles…',()=>manage(u)]);

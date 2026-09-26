@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
 const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
-const BUILD = '2026-09-26-shrink';   // must match BUILD in public/index.html (the page warns the admin when they differ)
+const BUILD = '2026-09-26-dm';   // must match BUILD in public/index.html (the page warns the admin when they differ)
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
@@ -290,10 +290,19 @@ const P = k => (isAdm(k) ? ALL : [...new Set(eff(k).flatMap(perms))]);   // perm
 const roleName = id => String(id === 'admin' ? 'Admin' : (db.roles[id] && db.roles[id].name) || id);
 const rank = id => (id === 'admin' ? 1e3 : id === 'default' ? -1 : perms(id).length);
 const primary = k => eff(k).slice().sort((a, b) => rank(b) - rank(a) || roleName(a).localeCompare(roleName(b)))[0];   // the role shown in lists and tags
-const chan = id => db.channels.find(c => c.id === id);
+// Direct messages: a private conversation between two people works like a hidden text channel "dm:alice|bob"
+// (names sorted). Only those two can open it — not even the admin.
+const dmId = (a, b) => 'dm:' + [a, b].sort().join('|');
+const dmChan = id => {
+  const m = /^dm:([^|]+)\|([^|]+)$/.exec(String(id || ''));
+  if (!m || m[1] === m[2] || !U(m[1]) || !U(m[2]) || dmId(m[1], m[2]) !== id) return null;
+  return { id, name: 'Direct message', type: 'text', dm: [m[1], m[2]], photos: true, open: false, roles: [] };
+};
+const chan = id => (String(id || '').startsWith('dm:') ? dmChan(id) : db.channels.find(c => c.id === id));
 // Who can see/enter a channel: admins always; if the channel lists roles, only people with one of them; otherwise open, or the "private" permission.
 const can = (k, c) => {
   if (!c) return false;
+  if (c.dm) return c.dm.includes(k) && !db.banned[k];   // private: only the two people in it
   if (isAdm(k)) return true;
   if (c.roles && c.roles.length) return c.roles.some(r => eff(k).includes(r));
   return c.open || P(k).includes('private');
@@ -338,7 +347,7 @@ function push() {
     try {
       send(w, {
         t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {}, notifs: db.users[w.key].notifs || [] },
-        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dl: process.env.DESKTOP_APP_URL || '', build: BUILD, bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
+        roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dms: dmsFor(w.key), dl: process.env.DESKTOP_APP_URL || '', build: BUILD, bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
   });
@@ -405,8 +414,26 @@ function unreadFor(k) {
     const n = (db.msgs[c.id] || []).filter(x => x.ts > read[c.id] && x.key !== k).length;
     if (n) out[c.id] = n;
   });
+  // direct messages: unread counts, and the list of my conversations (newest first)
+  for (const id of Object.keys(db.msgs)) {
+    const c = id.startsWith('dm:') && dmChan(id);
+    if (!c || !c.dm.includes(k)) continue;
+    const n = (db.msgs[id] || []).filter(x => x.ts > (read[id] || 0) && x.key !== k).length;
+    if (n) out[id] = n;
+  }
   if (changed) save();
   return out;
+}
+function dmsFor(k) {
+  const out = [];
+  for (const [id, list] of Object.entries(db.msgs)) {
+    const c = id.startsWith('dm:') && dmChan(id);
+    if (!c || !c.dm.includes(k) || !(list || []).length) continue;
+    if (((U(k).dmHide || {})[id] || 0) >= list[list.length - 1].ts) continue;   // hidden, and nothing new since
+    const last = list[list.length - 1];
+    out.push({ id, with: c.dm.find(x => x !== k), last: last.ts, preview: (last.key === k ? 'You: ' : '') + (last.text || '📷 Photo').slice(0, 60) });
+  }
+  return out.sort((a, b) => b.last - a.last);
 }
 const markRead = (k, id) => { const u = U(k), c = chan(id); if (u && c && can(k, c)) { (u.read || (u.read = {}))[c.id] = Date.now(); save(); } };
 
@@ -468,7 +495,8 @@ function handle(w, m) {
   const done = () => { save(); push(); };
   switch (m.t) {
     case 'open': { const c = chan(m.ch); if (can(k, c)) { markRead(k, c.id); send(w, { t: 'history', ch: c.id, msgs: db.msgs[c.id] || [] }); } break; }
-    case 'read': markRead(k, m.ch); break;   // saw new messages while the channel was open
+    case 'read': markRead(k, m.ch); break;
+    case 'dmhide': { const c = chan(m.ch); if (c && c.dm && c.dm.includes(k)) { (u.dmHide || (u.dmHide = {}))[c.id] = Date.now(); save(); push(); } break; }   // remove a conversation from my list (comes back on a new message)   // saw new messages while the channel was open
     case 'chat': {
       const c = chan(m.ch), text = String(m.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
       const imgs = c && c.photos ? (Array.isArray(m.imgs) ? m.imgs : []).map(String).filter(id => { const x = (db.uploads || {})[id]; return x && x.by === k && x.ch === c.id && !x.msg; }).slice(0, IMG_PER_MSG) : [];
@@ -651,7 +679,7 @@ function handle(w, m) {
     case 'bkclear': if (canBk && db.bk) { db.bk.slots.forEach(x => { x.name = ''; }); done(); } break;
     case 'clear': {
       const c = chan(m.ch);
-      if (!adm || !c) break;
+      if (!adm || !c || c.dm) break;   // private conversations are never cleared by the admin
       (db.msgs[c.id] || []).forEach(x => dropImages(x.imgs)); db.msgs[c.id] = []; save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'clear', ch: c.id }));
       break;
