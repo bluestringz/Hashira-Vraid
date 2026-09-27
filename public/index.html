@@ -1515,13 +1515,18 @@ async function cleanMic(raw){   // returns the stream to send: cleaned when "Str
     const src=ctx.createMediaStreamSource(raw),node=new AudioWorkletNode(ctx,'@sapphi-red/web-noise-suppressor/rnnoise',{processorOptions:{maxChannels:1,wasmBinary:nsWasm}}),dst=ctx.createMediaStreamDestination();
     const hp=ctx.createBiquadFilter();hp.type='highpass';hp.frequency.value=90;hp.Q.value=0.7;   // takes out wind rumble, desk bumps and hum below the voice
     src.connect(hp);hp.connect(node);node.connect(dst);
-    const out=dst.stream;out._raw=raw;out._ns={src,node,hp};
+    // A very quiet copy of the original (about -24 dB, lined up in time) under the cleaned voice: RNNoise on its own
+    // leaves dead-silent holes between syllables, which sounds choppy. This fills them with faint natural room sound,
+    // while keyboard, clicks and wind stay far below the voice.
+    const dl=ctx.createDelay(0.1),dry=ctx.createGain();dl.delayTime.value=0.02;dry.gain.value=0.06;
+    hp.connect(dl);dl.connect(dry);dry.connect(dst);
+    const out=dst.stream;out._raw=raw;out._ns={src,node,hp,dl,dry};
     return out;
   }catch(e){console.warn('Strong noise suppression not available, using the microphone as is:',e&&e.message);return raw}
 }
 function stopMic(s){   // stop a microphone stream, including the raw one behind a cleaned stream
   if(!s)return;s.getTracks().forEach(t=>t.stop());
-  if(s._raw){s._raw.getTracks().forEach(t=>t.stop());try{s._ns.src.disconnect();s._ns.node.port.postMessage('destroy');s._ns.node.disconnect()}catch{}}
+  if(s._raw){s._raw.getTracks().forEach(t=>t.stop());try{s._ns.dry&&s._ns.dry.disconnect();s._ns.src.disconnect();s._ns.node.port.postMessage('destroy');s._ns.node.disconnect()}catch{}}
 }
 const nsOn=s=>!!(s&&s._raw);
 function setSink(a){if(pref.spk&&a.setSinkId)a.setSinkId(pref.spk).catch(()=>{})}
