@@ -310,7 +310,7 @@ function on(m){
     unread=Object.assign({},m.unread||{});
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
     showUnread();
-    notifs=S.me.notifs||[];checkBuild();
+    notifs=S.me.notifs||[];checkBuild();if(S.music)S.music._recv=Date.now();
     render();syncPeers();repaintNames();applyTheme(m.theme);fitBrand();syncMusic();
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
@@ -904,7 +904,16 @@ let mDock=localStorage.mdock=='1';   // dock the player in the left sidebar (abo
 const sideShown=()=>{const s=$('#side');return s&&getComputedStyle(s).transform=='none'&&s.offsetWidth>0};
 function setMHidden(v){mHidden=v;try{localStorage.mhide=v?'1':'0'}catch{};syncMusic()}
 function ytApi(){return ytReady||(ytReady=new Promise(res=>{window.onYouTubeIframeAPIReady=res;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.append(s)}))}
-function musicUnlock(){mNeedClick=false;if(ytP&&S.music&&S.music.cur&&!S.music.cur.pausedAt)try{ytP.playVideo()}catch{}}
+function musicUnlock(){mNeedClick=false;musicResync(.5)}
+function musicResync(tol){   // put my player exactly where everyone else is (after Show, a click-to-play, a click on the video, a slow load…)
+  const c=S.music&&S.music.cur;if(!ytP||!ytP.getPlayerState||!c||ytCur!==c.id)return;
+  try{
+    if(c.pausedAt){ytP.pauseVideo();return}
+    const exp=mExpected();if(exp<=0)return;
+    if(Math.abs((ytP.getCurrentTime()||0)-exp)>(tol||1.5))ytP.seekTo(exp,true);
+    if(ytP.getPlayerState()!==YT.PlayerState.PLAYING)ytP.playVideo();
+  }catch{}
+}
 function mExpected(){const c=S.music.cur;return Math.max(0,((c.pausedAt||Date.now()+mOff)-c.start)/1000)}
 async function syncMusic(){
   const mu=vc?S.music:null;
@@ -917,7 +926,7 @@ async function syncMusic(){
     return;
   }
   $('#mpill')&&$('#mpill').remove();
-  mOff=mu.now-Date.now();
+  mOff=mu.now-(mu._recv||Date.now());   // server clock vs mine, measured when the update arrived (not later)
   drawMusicCard(mu);
   await ytApi();
   if(!ytP){
@@ -925,12 +934,11 @@ async function syncMusic(){
     await new Promise(res=>{ytP=new YT.Player('mplay',{width:200,height:200,videoId:mu.cur.id,playerVars:{autoplay:1,controls:0,disablekb:1,modestbranding:1,rel:0,playsinline:1,start:Math.floor(mExpected())},
       events:{onReady:()=>{ytP.setVolume(mVol);applyMusic();res()},
         onStateChange:e=>{if(e.data===YT.PlayerState.ENDED&&S.music&&S.music.cur)tx({t:'music',op:'ended',id:S.music.cur.id});
+          if(e.data===YT.PlayerState.PLAYING)setTimeout(()=>musicResync(.5),600);   // just started playing: catch up with everyone
+          if(e.data===YT.PlayerState.PAUSED&&S.music&&S.music.cur&&!S.music.cur.pausedAt)setTimeout(()=>musicResync(.5),400);   // paused only here (e.g. a tap on the video): keep going with everyone
           if(e.data===YT.PlayerState.UNSTARTED||e.data===YT.PlayerState.CUED)setTimeout(()=>{if(ytP&&ytP.getPlayerState&&ytP.getPlayerState()!==1&&S.music&&S.music.cur&&!S.music.cur.pausedAt&&mExpected()>0){mNeedClick=true;drawMusicCard(S.music)}},2500)},
         onError:e=>{toast('🎵 This song cannot be played here, skipping');if(S.music&&S.music.cur)tx({t:'music',op:'ended',id:S.music.cur.id})}}})});
-    clearInterval(mDrift);mDrift=setInterval(()=>{   // stay in step with everyone else
-      if(!ytP||!ytP.getCurrentTime||!S.music||!S.music.cur||S.music.cur.pausedAt)return;
-      const d=ytP.getCurrentTime()-mExpected();if(Math.abs(d)>2)ytP.seekTo(mExpected(),true);
-    },8000);
+    clearInterval(mDrift);mDrift=setInterval(()=>musicResync(1.5),4000);   // stay in step with everyone else
     return;
   }
   if(ytCur!==mu.cur.id){ytCur=mu.cur.id;ytP.loadVideoById({videoId:mu.cur.id,startSeconds:mExpected()})}
@@ -1479,8 +1487,9 @@ function stChip(k){
 const pref={mic:'',spk:'',ns:'strong'};try{pref.mic=localStorage.mic||'';pref.spk=localStorage.spk||'';pref.ns=localStorage.ns||'strong'}catch{}
 const savePref=()=>{try{localStorage.mic=pref.mic;localStorage.spk=pref.spk;localStorage.ns=pref.ns}catch{}};
 let isBrave=false;try{navigator.brave&&navigator.brave.isBrave().then(v=>isBrave=!!v)}catch{}
-// "Standard" = the browser's own noise suppression. "Strong" = the browser's plus RNNoise (below), like Discord's Krisp.
-const micConstraints=()=>({audio:Object.assign({echoCancellation:true,noiseSuppression:pref.ns!='off',autoGainControl:true,channelCount:{ideal:1}},pref.mic?{deviceId:{ideal:pref.mic}}:{})});
+// "Standard" = the browser's own noise suppression. "Strong" = RNNoise alone (below), like Discord's Krisp.
+// (Both together cut into the voice and made it choppy, so Strong turns the browser's one off.)
+const micConstraints=()=>({audio:Object.assign({echoCancellation:true,noiseSuppression:pref.ns=='standard',autoGainControl:true,channelCount:{ideal:1}},pref.mic?{deviceId:{ideal:pref.mic}}:{})});
 
 /* ---------- Strong noise suppression (RNNoise, runs in the browser; files in public/ns/, MIT licence) ----------
    Removes keyboard, fan, traffic, dogs and other background noise from your microphone before it is sent. */
@@ -1504,8 +1513,9 @@ async function cleanMic(raw){   // returns the stream to send: cleaned when "Str
     if(ctx.state!='running'){ctx.resume();await new Promise(r=>setTimeout(r,300))}
     if(ctx.state!='running')throw new Error('audio is not unlocked yet');   // e.g. auto-rejoin after a refresh, before any click
     const src=ctx.createMediaStreamSource(raw),node=new AudioWorkletNode(ctx,'@sapphi-red/web-noise-suppressor/rnnoise',{processorOptions:{maxChannels:1,wasmBinary:nsWasm}}),dst=ctx.createMediaStreamDestination();
-    src.connect(node);node.connect(dst);
-    const out=dst.stream;out._raw=raw;out._ns={src,node};
+    const hp=ctx.createBiquadFilter();hp.type='highpass';hp.frequency.value=90;hp.Q.value=0.7;   // takes out wind rumble, desk bumps and hum below the voice
+    src.connect(hp);hp.connect(node);node.connect(dst);
+    const out=dst.stream;out._raw=raw;out._ns={src,node,hp};
     return out;
   }catch(e){console.warn('Strong noise suppression not available, using the microphone as is:',e&&e.message);return raw}
 }
@@ -1582,7 +1592,7 @@ async function audioSetup(){
   msel.onchange=async()=>{pref.mic=msel.value;savePref();await startMeter();if(vc&&local)switchMic()};
   const canSink=!!(window.HTMLMediaElement&&HTMLMediaElement.prototype.setSinkId);
   ssel.onchange=()=>{pref.spk=ssel.value;savePref();Object.values(auds).forEach(setSink)};
-  const nsel=E('select');[['strong','Strong (removes keyboard, fan and background noise)'],['standard','Standard (browser)'],['off','Off']].forEach(([v,t])=>{const o=E('option',0,t);o.value=v;nsel.append(o)});nsel.value=pref.ns;
+  const nsel=E('select');[['strong','Strong (removes keyboard, mouse clicks, wind, fan; keeps your voice clear)'],['standard','Standard (browser)'],['off','Off']].forEach(([v,t])=>{const o=E('option',0,t);o.value=v;nsel.append(o)});nsel.value=pref.ns;
   const nst=E('small');const nsInfo=()=>{nst.textContent=pref.ns=='strong'?(nsOn(stream)?'✓ Strong noise suppression is on.':'Strong is not available in this browser, so Standard is used.'):''};
   nsel.onchange=async()=>{pref.ns=nsel.value;savePref();await startMeter();nsInfo();if(vc&&local)switchMic()};
   hm.onclick=()=>{if(me2){me2.srcObject=null;me2=null;hm.textContent='Hear myself';return}if(!stream)return;me2=new Audio();me2.srcObject=stream;setSink(me2);me2.play().catch(()=>{});hm.textContent='Stop hearing myself'};
@@ -1777,11 +1787,11 @@ function ensureCap(){   // send my microphone to the people on backup audio
       for(let i=0;i<n;i++){   // average the samples that fall into each output sample (a simple low-pass)
         const a=Math.floor(pos+i*ratio),b=Math.max(a+1,Math.floor(pos+(i+1)*ratio));let sum=0;
         for(let j=a;j<b&&j<inp.length;j++)sum+=inp[j];
-        const x=sum/(b-a);if(x>0.008||x<-0.008)loud=true;out[i]=mulaw(x);
+        const x=sum/(b-a);if(x>0.003||x<-0.003)loud=true;out[i]=mulaw(x);   // low threshold: soft word endings are not cut
       }
       pos=pos+n*ratio-inp.length;
       const now=performance.now();if(loud)lastLoud=now;
-      if(now-lastLoud>400)return;   // silence: send nothing
+      if(now-lastLoud>700)return;   // silence (after a short hold): send nothing
       if(!relayOn.size||muted||deaf||svm()||svd()||!ws||ws.readyState!==1||ws.bufferedAmount>64e3)return;
       ws.send(out);
     };
