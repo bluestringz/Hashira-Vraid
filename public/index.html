@@ -112,8 +112,13 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #send>button{min-height:40px}
 #lbox{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px}
 #lbox img{max-width:100%;max-height:calc(100% - 60px);object-fit:contain;border-radius:6px}#lbox .lbar{display:flex;gap:8px}#lbox a.p{padding:7px 14px;border-radius:6px;text-decoration:none;color:#fff;background:var(--btn,var(--red))}
-#mcard{position:fixed;right:16px;bottom:84px;z-index:45;display:flex;gap:10px;align-items:stretch;width:430px;max-width:calc(100vw - 32px);background:#140a0e;border:1px solid var(--bd);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+#mcard{position:fixed;right:16px;bottom:84px;z-index:45;display:grid;grid-template-columns:200px 1fr;grid-template-rows:auto 1fr;column-gap:10px;row-gap:4px;align-items:stretch;width:430px;max-width:calc(100vw - 32px);background:#140a0e;border:1px solid var(--bd);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 #mcard .mpw{width:200px;height:200px;flex:none;border-radius:8px;overflow:hidden;background:#000}
+#mcard .mbar{grid-column:1/-1;display:flex;align-items:center;gap:4px}#mcard .mgrip{flex:1;cursor:grab;color:var(--mut);font-size:12px;user-select:none;touch-action:none}#mcard.drag .mgrip{cursor:grabbing}
+#mcard .mbar .x{padding:0 7px;font-size:12px;line-height:20px}
+#mcard.compact{grid-template-columns:200px;width:auto}#mcard.compact .minfo>small,#mcard.compact .minfo>b{display:none}#mcard.compact .minfo{width:200px}
+#mcard.drag iframe{pointer-events:none}
+#mpill{position:fixed;right:16px;bottom:84px;z-index:45;max-width:calc(100vw - 32px);font-size:12px;padding:6px 12px;border-radius:16px;background:#140a0e;border:1px solid var(--bd);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mcard .minfo{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}#mcard .minfo b{font-size:14px;line-height:1.3;word-break:break-word}#mcard .minfo small{color:var(--mut)}
 #mcard .mbtn{display:flex;gap:6px;margin-top:auto}#mcard .mbtn button{flex:1;padding:6px 0;font-size:15px}
 #mcard .mvol{display:flex;align-items:center;gap:6px}#mcard .mvol input{flex:1;padding:0;border:0;background:none;accent-color:var(--btn,var(--red))}
@@ -821,7 +826,7 @@ function appearance(){
   nm.onkeydown=e=>{if(e.key=='Enter')ns.click()};const nrow=E('div','row');nrow.append(nm,ns);
   modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),E('label',0,'App name'),nrow,...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
-const BUILD='2026-09-27-health';   // must match BUILD in server.js
+const BUILD='2026-09-27-mpause';   // must match BUILD in server.js
 let buildWarned=false;
 function checkBuild(){   // admin only: the page and the server are from different updates (usually server.js was not uploaded)
   if(buildWarned||S.me.role!='admin'||S.build===BUILD)return;buildWarned=true;
@@ -881,6 +886,7 @@ function musicCommand(t){
   if(!['play','skip','pause','resume','stop','queue','np'].includes(op))return false;
   if(!vc){toast('🎵 Join a voice channel first, then use /'+op);return true}
   if(op=='queue'||op=='np'){musicInfo(op);return true}
+  if((op=='pause'||op=='resume')&&!(S.me.role=='admin'||S.me.perms.includes('musicpause'))){toast('🎵 Only Senior and Admin can pause or resume the music');return true}
   tx({t:'music',op,q:arg});if(op=='play'){musicUnlock();toast('🎵 Looking up the song…')}
   return true;
 }
@@ -890,12 +896,23 @@ function musicInfo(op){
   modal('Music queue',E('b',0,'▶ '+mu.cur.title),E('small',0,'added by '+mu.cur.by),...(mu.queue.length?mu.queue.map((s,i)=>E('div',0,(i+1)+'. '+s.title+' — '+s.by)):[E('small',0,'Nothing else in the queue. Add with /play <link>')]));
 }
 let ytReady=null,ytP=null,ytCur=null,mOff=0,mVol=+(localStorage.mvol||50),mDrift=null,mNeedClick=false;
+// Player options (only for you): hide it (music stops for you, no data used), make it compact, or drag it anywhere.
+let mHidden=localStorage.mhide=='1',mCompact=localStorage.mcompact=='1',mPos=null;try{mPos=JSON.parse(localStorage.mpos||'null')}catch{}
+function setMHidden(v){mHidden=v;try{localStorage.mhide=v?'1':'0'}catch{};syncMusic()}
 function ytApi(){return ytReady||(ytReady=new Promise(res=>{window.onYouTubeIframeAPIReady=res;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.append(s)}))}
 function musicUnlock(){mNeedClick=false;if(ytP&&S.music&&S.music.cur&&!S.music.cur.pausedAt)try{ytP.playVideo()}catch{}}
 function mExpected(){const c=S.music.cur;return Math.max(0,((c.pausedAt||Date.now()+mOff)-c.start)/1000)}
 async function syncMusic(){
   const mu=vc?S.music:null;
-  if(!mu||!mu.cur){if(ytP){try{ytP.destroy()}catch{}ytP=null;ytCur=null}$('#mcard')&&$('#mcard').remove();clearInterval(mDrift);return}
+  const stop=()=>{if(ytP){try{ytP.destroy()}catch{}ytP=null;ytCur=null}$('#mcard')&&$('#mcard').remove();clearInterval(mDrift)};
+  if(!mu||!mu.cur){stop();$('#mpill')&&$('#mpill').remove();return}
+  if(mHidden){   // hidden: no player at all (YouTube does not allow an invisible player), so the music is off for me only
+    stop();let p=$('#mpill');
+    if(!p){p=E('button');p.id='mpill';p.onclick=()=>setMHidden(false);document.body.append(p)}
+    p.textContent='🎵 Music hidden (off for you) • '+mu.cur.title.slice(0,40)+' — Show';p.title='Show the music player again';
+    return;
+  }
+  $('#mpill')&&$('#mpill').remove();
   mOff=mu.now-Date.now();
   drawMusicCard(mu);
   await ytApi();
@@ -924,9 +941,30 @@ function applyMusic(){
   if(Math.abs((ytP.getCurrentTime()||0)-mExpected())>2)ytP.seekTo(mExpected(),true);
   ytP.playVideo();
 }
+function placeCard(c){
+  if(!mPos){c.style.left='';c.style.top='';c.style.right='16px';c.style.bottom='84px';return}
+  const w=c.offsetWidth,h=c.offsetHeight;
+  c.style.right='auto';c.style.bottom='auto';
+  c.style.left=Math.max(4,Math.min(innerWidth-w-4,mPos.x))+'px';c.style.top=Math.max(4,Math.min(innerHeight-h-4,mPos.y))+'px';
+}
+addEventListener('resize',()=>{const c=$('#mcard');if(c)placeCard(c)});
 function drawMusicCard(mu){
   let c=$('#mcard');
-  if(!c){c=E('div');c.id='mcard';const pw=E('div','mpw');const ph=E('div');ph.id='mplay';pw.append(ph);c.append(pw,E('div','minfo'));document.body.append(c)}
+  if(!c){
+    c=E('div');c.id='mcard';const pw=E('div','mpw');const ph=E('div');ph.id='mplay';pw.append(ph);
+    const bar=E('div','mbar');const grip=E('span','mgrip','⠿ Music');grip.title='Drag to move the player';
+    const cp=E('button','x','▭');cp.title='Compact / full';cp.onclick=()=>{mCompact=!mCompact;try{localStorage.mcompact=mCompact?'1':'0'}catch{};c.classList.toggle('compact',mCompact);placeCard(c)};
+    const hd=E('button','x','✕');hd.title='Hide the player (the music stops for you only)';hd.onclick=()=>setMHidden(true);
+    bar.append(grip,cp,hd);
+    c.append(bar,pw,E('div','minfo'));document.body.append(c);c.classList.toggle('compact',mCompact);
+    grip.addEventListener('pointerdown',e=>{   // drag anywhere; the spot is remembered
+      e.preventDefault();const r=c.getBoundingClientRect(),dx=e.clientX-r.left,dy=e.clientY-r.top;c.classList.add('drag');
+      const mv=ev=>{mPos={x:ev.clientX-dx,y:ev.clientY-dy};placeCard(c)};
+      const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);c.classList.remove('drag');try{localStorage.mpos=JSON.stringify(mPos)}catch{}};
+      addEventListener('pointermove',mv);addEventListener('pointerup',up);
+    });
+    placeCard(c);
+  }
   const inf=c.querySelector('.minfo');inf.replaceChildren();
   inf.append(E('small',0,mu.cur.pausedAt?'⏸ Paused':'🎵 Now playing'),E('b',0,mu.cur.title),E('small',0,'added by '+mu.cur.by+(mu.queue.length?' • '+mu.queue.length+' in queue':'')));
   const row=E('div','mbtn');
@@ -934,7 +972,8 @@ function drawMusicCard(mu){
   const sk=E('button',0,'⏭');sk.title='Skip (/skip)';sk.onclick=()=>tx({t:'music',op:'skip'});
   const st=E('button',0,'⏹');st.title='Stop (/stop)';st.onclick=()=>confirm('Stop the music for everyone?')&&tx({t:'music',op:'stop'});
   const ql=E('button',0,'☰');ql.title='Queue (/queue)';ql.onclick=()=>musicInfo('queue');
-  row.append(pp,sk,st,ql);
+  const canPause=S.me.role=='admin'||S.me.perms.includes('musicpause');   // pause / resume: Senior and Admin only
+  row.append(...(canPause?[pp]:[]),sk,st,ql);
   const vw=E('label','mvol');const v=E('input');v.type='range';v.min=0;v.max=100;v.value=mVol;v.title='Music volume (only for you)';
   v.oninput=()=>{mVol=+v.value;try{localStorage.mvol=mVol}catch{};ytP&&ytP.setVolume&&ytP.setVolume(mVol)};vw.append(E('span',0,'🔈'),v);
   inf.append(row,vw);
@@ -1149,7 +1188,7 @@ function manage(u){
   voiceItems(u).forEach(([l,f])=>{const b=E('button',0,l);b.onclick=()=>{f();close()};n.push(b)});
   modal(u.name,...n);managing={k:u.key,sig:JSON.stringify([u.roles,u.banned])};
 }
-const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",everyone:'Use @everyone (notifies everyone in the channel)',bracket:'Edit the tournament bracket (names, layout, colours, background)',private:'See private voice and text channels'};
+const PL={channels:'Create, rename, delete and organize channels',kick:'Kick and ban users',assign:'Assign roles (not staff roles)',roles:'Edit and delete roles (only up to your own permissions; only the admin creates new ones)',voicemod:'Mute or deafen members in voice',disconnect:'Disconnect members from voice',move:'Move members between voice channels',nick:"Change members' nicknames",musicpause:'Pause / resume the music in voice',everyone:'Use @everyone (notifies everyone in the channel)',bracket:'Edit the tournament bracket (names, layout, colours, background)',private:'See private voice and text channels'};
 function roleRow(id,r){
   const mine=S.me.perms,locked=id=='default',ok=!locked&&r.perms.every(x=>mine.includes(x));   // Default is permanent; other roles only within your own level
   const d=E('div','rr'),top=E('div','top'),nm=E('input'),co=E('input');

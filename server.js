@@ -3,16 +3,16 @@ const crypto = require('crypto'), fs = require('fs'), path = require('path');
 const { Pool } = require('pg');
 
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
-const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
+const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone', 'musicpause'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
-const BUILD = '2026-09-27-health';   // must match BUILD in public/index.html (the page warns the admin when they differ)
+const BUILD = '2026-09-27-mpause';   // must match BUILD in public/index.html (the page warns the admin when they differ)
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
   roles: {
     default: { name: 'Default', color: '#8a8a94', perms: [] },
     verified: { name: 'Verified', color: '#2f9e6b', perms: ['private'] },
-    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick', 'bracket', 'everyone'] }
+    senior: { name: 'Senior', color: '#e11d2e', perms: ['channels', 'kick', 'private', 'assign', 'move', 'nick', 'bracket', 'everyone', 'musicpause'] }
   },
   cats: [{ id: 'text', name: 'Text Channels' }, { id: 'voice', name: 'Voice Channels' }],
   channels: [
@@ -80,6 +80,10 @@ function seedAdmin() {
   if (!db.mig1) {   // one time: existing Senior role gets the new "move members" permission
     if (db.roles.senior && !db.roles.senior.perms.includes('move')) db.roles.senior.perms.push('move');
     db.mig1 = 1;
+  }
+  if (!db.mig5) {   // one time: existing Senior role can pause / resume the music
+    if (db.roles.senior && !db.roles.senior.perms.includes('musicpause')) db.roles.senior.perms.push('musicpause');
+    db.mig5 = 1;
   }
   if (!db.mig4) {   // one time: existing Senior role can use @everyone
     if (db.roles.senior && !db.roles.senior.perms.includes('everyone')) db.roles.senior.perms.push('everyone');
@@ -596,12 +600,19 @@ async function ytLookup(q) {   // a link -> {id,title}; words -> first search re
     try { const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id), { signal: AbortSignal.timeout(5000) }); if (r.ok) title = (await r.json()).title || title; else if (r.status === 401 || r.status === 403) return { error: 'That video cannot be played here (the owner turned off embedding)' }; else if (r.status === 404) return { error: 'Video not found' }; } catch {}
     return { id, title };
   }
-  if (!process.env.YT_API_KEY) return { error: 'Paste a YouTube link, e.g. /play https://youtu.be/...' };
+  if (!process.env.YT_API_KEY) return { error: 'Paste a YouTube link, e.g. /play https://youtu.be/... (searching by song name needs YT_API_KEY in Render)' };
+  const ck = q.toLowerCase().replace(/\s+/g, ' ');
+  db.ytCache = db.ytCache || {};
+  if (db.ytCache[ck]) return db.ytCache[ck];   // same song name asked before: no search needed (saves the daily search limit)
   try {
     const r = await fetch('https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=1&q=' + encodeURIComponent(q) + '&key=' + process.env.YT_API_KEY, { signal: AbortSignal.timeout(6000) });
+    if (r.status === 403) return { error: 'Song search limit for today is used up. Paste a YouTube link instead (it resets daily).' };
     const it = r.ok && ((await r.json()).items || [])[0];
     if (!it) return { error: 'No song found for "' + q + '"' };
-    return { id: it.id.videoId, title: it.snippet.title.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&') };
+    const found = { id: it.id.videoId, title: it.snippet.title.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&') };
+    const keys = Object.keys(db.ytCache); if (keys.length > 500) delete db.ytCache[keys[0]];
+    db.ytCache[ck] = found; save();
+    return found;
   } catch { return { error: 'Search is not available right now' }; }
 }
 const musicOut = ch => { const mu = music[ch]; return mu && (mu.cur || mu.queue.length) ? { cur: mu.cur, queue: mu.queue.slice(0, 20), now: Date.now() } : null; };
@@ -634,6 +645,7 @@ async function musicCmd(w, m) {
   if (op === 'ended') { if (m.id === mu.cur.id && !mu.cur.pausedAt && Date.now() - mu.cur.start > 3000) musicNext(ch); return; }   // a listener's player finished the song
   if (op === 'skip') { musicSay(ch, '⏭ ' + u.name + ' skipped: ' + mu.cur.title); return musicNext(ch); }
   if (op === 'stop') { delete music[ch]; musicSay(ch, '⏹ ' + u.name + ' stopped the music'); return push(); }
+  if ((op === 'pause' || op === 'resume') && !(isAdm(k) || P(k).includes('musicpause'))) return send(w, { t: 'mtoast', text: '🎵 Only Senior and Admin can pause or resume the music' });
   if (op === 'pause' && !mu.cur.pausedAt) { mu.cur.pausedAt = Date.now(); musicSay(ch, '⏸ Paused by ' + u.name); return push(); }
   if (op === 'resume' && mu.cur.pausedAt) { mu.cur.start += Date.now() - mu.cur.pausedAt; mu.cur.pausedAt = null; musicSay(ch, '▶ Resumed by ' + u.name); return push(); }
 }
