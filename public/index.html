@@ -112,6 +112,12 @@ aside,main{background:var(--pan);backdrop-filter:blur(10px);display:flex;flex-di
 #send>button{min-height:40px}
 #lbox{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px}
 #lbox img{max-width:100%;max-height:calc(100% - 60px);object-fit:contain;border-radius:6px}#lbox .lbar{display:flex;gap:8px}#lbox a.p{padding:7px 14px;border-radius:6px;text-decoration:none;color:#fff;background:var(--btn,var(--red))}
+#mcard{position:fixed;right:16px;bottom:84px;z-index:45;display:flex;gap:10px;align-items:stretch;width:430px;max-width:calc(100vw - 32px);background:#140a0e;border:1px solid var(--bd);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+#mcard .mpw{width:200px;height:200px;flex:none;border-radius:8px;overflow:hidden;background:#000}
+#mcard .minfo{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}#mcard .minfo b{font-size:14px;line-height:1.3;word-break:break-word}#mcard .minfo small{color:var(--mut)}
+#mcard .mbtn{display:flex;gap:6px;margin-top:auto}#mcard .mbtn button{flex:1;padding:6px 0;font-size:15px}
+#mcard .mvol{display:flex;align-items:center;gap:6px}#mcard .mvol input{flex:1;padding:0;border:0;background:none;accent-color:var(--btn,var(--red))}
+#mbox .mo small{margin-left:auto}
 .rx{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.rx:empty{display:none}
 .rchip{font-size:13px;padding:1px 7px;border-radius:10px;background:var(--pan2);border:1px solid var(--bd);line-height:20px}
 .rchip.mine{border-color:var(--btn,var(--red));background:rgba(225,29,46,.18)}
@@ -261,12 +267,14 @@ function connect(){
   if(ws&&(ws.readyState===0||ws.readyState===1))return;   // never keep two sockets
   const sock=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws?token='+tok);
   ws=sock;
-  sock.onopen=()=>{if(sock===ws)sendVS()};
+  sock.onopen=()=>{if(sock!==ws)return;sendVS();if(vc)tx({t:'join',ch:vc,resume:1})};
+  // closing or refreshing the tab = a real leave (others see it right away); minimising the phone does not fire this
+  if(!window.__leaveHook){window.__leaveHook=1;addEventListener('beforeunload',()=>{if(vc&&ws&&ws.readyState===1)tx({t:'leave'})})}   // back after a drop (e.g. phone was minimised): continue in the same voice channel
   sock.binaryType='arraybuffer';
   sock.onmessage=e=>{if(sock!==ws)return;if(typeof e.data!='string')return onBin(e.data);on(JSON.parse(e.data))};
   sock.onclose=e=>{
     if(sock!==ws)return;   // a late close from an old socket must not tear down the live one
-    leaveVoice(true);
+    if(e.code>=4000)leaveVoice(true);   // on a plain drop the voice keeps going; the server holds our place for 60 s
     if(e.code>=4000){
       want(null);
       if(e.code!=4004)delete localStorage.tk;   // 4004 = signed in elsewhere; keep the token so another tab of this browser keeps working
@@ -296,7 +304,7 @@ function on(m){
     if(cur&&unread[cur.id]&&!document.hidden){delete unread[cur.id];tx({t:'read',ch:cur.id})}
     showUnread();
     notifs=S.me.notifs||[];checkBuild();
-    render();syncPeers();repaintNames();applyTheme(m.theme);fitBrand();
+    render();syncPeers();repaintNames();applyTheme(m.theme);fitBrand();syncMusic();
     if(managing&&!$('#modal').classList.contains('hide')){const u=S.users.find(x=>x.key==managing.k);if(u&&JSON.stringify([u.roles,u.banned])!=managing.sig)manage(u);else if(!u)close()}
     if(lost){lost=false;toast('Reconnected')}
     reconcile();
@@ -318,10 +326,13 @@ function on(m){
   else if(m.t=='peers')m.peers.forEach(k=>{if(pcs[k])closePeer(k);mk(k,true)});
   else if(m.t=='moved'){Object.keys(pcs).forEach(closePeer);vc=m.ch;want(m.ch);toast('A moderator moved you to another voice channel');const c=S&&S.channels.find(x=>x.id==m.ch);if(c)pick(c)}
   else if(m.t=='sig')onSig(m.from,m.data);
-  else if(m.t=='vev'){m.ev=='join'?sJoin():sLeave()}
+  else if(m.t=='vev'){if(m.ev=='join'&&pcs[m.key])closePeer(m.key);m.ev=='join'?sJoin():sLeave()}   // someone joined fresh: drop any old connection to them first
+  else if(m.t=='resumed'){lost=false}
   else if(m.t=='kicked'||m.t=='denied'){want(null);leaveVoice(true);toast(m.by?'You were disconnected from voice by a moderator':'You no longer have access to that voice channel')}
   else if(m.t=='error')alert(m.msg);
   else if(m.t=='notif'){notifs=[m.n,...notifs].slice(0,50);drawBell();sMention();toast('🔔 '+m.n.fromName+(m.n.all?' mentioned @everyone':' mentioned you')+' in #'+m.n.chName);deskNotify(m.n)}
+  else if(m.t=='mtoast')toast(m.text);
+  else if(m.t=='imgleft'){S.me.imgLeft=m.n;S.me.imgDaily=m.of;syncAttach()}
   else if(m.t=='notifs'){notifs=m.list;drawBell();if($('#npanel'))notifPanel(true)}
   else if(m.t=='edit'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.msg.id||m.msg.ts))+'"]');if(e&&!e.querySelector('.medit'))e.replaceWith(msgEl(m.msg));else if(e)e._m=m.msg}
   else if(m.t=='react'&&cur&&m.ch==cur.id){const e=document.querySelector('.m[data-id="'+CSS.escape(String(m.id))+'"] .rx');e&&drawRx(e,m.id,m.re)}
@@ -421,6 +432,14 @@ let mq=null;
 function mentionBox(){
   const i=$('#txt'),pos=i.selectionStart,before=i.value.slice(0,pos),at=before.lastIndexOf('@');
   let box=$('#mbox');
+  if(/^\/\w*$/.test(i.value)){   // "/" at the start: show the music commands
+    const list=MCMDS.filter(c=>c[0].startsWith(i.value.toLowerCase()));
+    if(!list.length){box&&box.remove();mq=null;return}
+    if(!box){box=E('div');box.id='mbox';$('#send').append(box)}
+    mq={cmd:1,list,sel:0};box.replaceChildren();
+    list.forEach((c,ix)=>{const r=E('div','mo'+(ix==0?' on':''));r.append(E('b',0,c[0]+' '),E('span',0,c[1]),E('small',0,c[2]));r.onmousedown=e=>{e.preventDefault();mq.sel=ix;pickMention()};box.append(r)});
+    return;
+  }
   const q=at>=0&&(at==0||/\s/.test(before[at-1]))?before.slice(at+1):null;
   if(q==null||q.length>20||/\n/.test(q)){box&&box.remove();mq=null;return}
   let list=S.users.filter(u=>!u.banned&&u.key!=S.me.key&&u.name.toLowerCase().startsWith(q.toLowerCase())).sort((a,b)=>b.on-a.on||a.name.localeCompare(b.name)).slice(0,8);
@@ -432,6 +451,7 @@ function mentionBox(){
   list.forEach((u,ix)=>{const r=E('div','mo'+(ix==mq.sel?' on':''));r.append(u.all?E('div','av','📢'):avEl(u.key,u.name),E('span',0,u.all?'@everyone':u.name));if(u.all)r.append(E('small',0,'notify everyone here'));const c=nameColor(u);if(c)r.lastChild.style.color=c;r.onmousedown=e=>{e.preventDefault();mq.sel=ix;pickMention()};box.append(r)});
 }
 function pickMention(){
+  if(mq&&mq.cmd){const i=$('#txt'),c=mq.list[mq.sel];i.value=c[0]+(c[1]?' ':'');i.focus();$('#mbox')&&$('#mbox').remove();mq=null;return}
   const i=$('#txt'),u=mq.list[mq.sel],ins='@'+u.name+' ';
   i.value=(i.value.slice(0,mq.at)+ins+i.value.slice(mq.end)).slice(0,500);i.focus();i.selectionStart=i.selectionEnd=mq.at+ins.length;
   $('#mbox')&&$('#mbox').remove();mq=null;
@@ -488,6 +508,9 @@ async function shrinkImg(f){
 }
 async function attach(files){
   if(!cur||cur.type!='text'||!cur.photos)return toast('Photos are not allowed in this channel');
+  const left=(S.me.imgLeft!=null?S.me.imgLeft:99)-pend.length;
+  if(left<=0)return toast('Daily limit reached: '+(S.me.imgDaily||20)+' photos per day. You can send more tomorrow.');
+  if(files.length>left){toast('Only '+left+' more photo'+(left==1?'':'s')+' today');files=files.slice(0,left)}
   for(let f of files){
     if(!/^image\//.test(f.type)&&!/\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(f.name||''))continue;
     if(pend.length>=4){toast('Up to 4 photos per message');break}
@@ -519,6 +542,7 @@ function checkPhotoWatch(){
 }
 function syncAttach(){   // the 🖼 button shows only where photos are allowed
   const ok=!!(cur&&cur.type=='text'&&cur.photos);$('#attb').classList.toggle('hide',!ok);
+  if(S&&S.me.imgLeft!=null)$('#attb').title='Send a photo ('+S.me.imgLeft+' of '+S.me.imgDaily+' left today)';
   if(!ok&&pend.length){pend=[];drawPend()}
 }
 function addMsg(m){const box=$('#msgs'),near=box.scrollHeight-box.scrollTop-box.clientHeight<120;box.append(msgEl(m));if(near||m.key==S.me.key)box.scrollTop=box.scrollHeight}
@@ -797,7 +821,7 @@ function appearance(){
   nm.onkeydown=e=>{if(e.key=='Enter')ns.click()};const nrow=E('div','row');nrow.append(nm,ns);
   modal('Appearance',E('small',0,'Changes are saved right away and everyone sees them.'),E('label',0,'App name'),nrow,...pic('bg','background'),...pic('logo','logo'),E('label',0,'Main button colour (Login, Send, …)'),crow);
 }
-const BUILD='2026-09-26-icons';   // must match BUILD in server.js
+const BUILD='2026-09-27-health';   // must match BUILD in server.js
 let buildWarned=false;
 function checkBuild(){   // admin only: the page and the server are from different updates (usually server.js was not uploaded)
   if(buildWarned||S.me.role!='admin'||S.build===BUILD)return;buildWarned=true;
@@ -815,14 +839,108 @@ function newDM(){   // pick someone to message
     const r=E('div','mo');r.append(avEl(u.key,u.name),E('span',0,u.name));if(u.on)r.append(E('small',0,'online'));r.onclick=()=>{close();openDM(u.key)};list.append(r)})};
   q.oninput=draw;draw();modal('New message',q,list);setTimeout(()=>q.focus(),50);
 }
+function backupModal(){   // admin: download everything, or load a backup (e.g. on a new Render service)
+  const dl=E('button','p','Download backup'),st=E('small');
+  dl.onclick=async()=>{st.textContent='Preparing…';
+    const r=await fetch('/api/backup',{headers:{Authorization:'Bearer '+tok}}).catch(()=>null);
+    if(!r||!r.ok)return st.textContent='Could not make the backup';
+    const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+    st.textContent='✓ Backup downloaded ('+Math.round(b.size/1024)+' KB). Keep this file safe: it has all accounts.'};
+  const f=E('input');f.type='file';f.accept='.json,application/json';f.style.display='none';
+  const up=E('button','dng','Restore from a backup…');up.onclick=()=>f.click();
+  f.onchange=async()=>{const file=f.files[0];f.value='';if(!file)return;
+    if(!confirm('Replace EVERYTHING on this site with "'+file.name+'"?\n\nAll accounts, channels, chat and settings here will be replaced. Everyone will be signed out and must log in again (with their old passwords).'))return;
+    st.textContent='Restoring…';
+    const r=await fetch('/api/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream',Authorization:'Bearer '+tok},body:file}).catch(()=>null);
+    const j=r?await r.json().catch(()=>({})):{};
+    if(!r||!r.ok)return st.textContent=j.error||'Restore failed';
+    st.textContent='✓ Restored. Signing out…';setTimeout(()=>{delete localStorage.tk;location.reload()},1200)};
+  modal('Backup & restore',E('small',0,'Backup: one file with all accounts, roles, channels, chat, direct messages, bracket and appearance. Chat photos are not included (they expire after 5 days).'),dl,
+    E('small',0,'Restore: use this on a NEW site to bring everything over. It replaces everything here.'),up,f,st);
+}
 function photoLimit(){   // admin: type the largest photo size in MB
   const i=E('input');i.type='number';i.min=0.5;i.max=25;i.step=0.5;i.value=imgMB();
   const sv=E('button','p','Save'),st=E('small');
   sv.onclick=()=>{const v=Math.round(parseFloat(i.value)*10)/10;if(!(v>=0.5&&v<=25))return st.textContent='Type a number from 0.5 to 25';tx({t:'imgmax',mb:v});close();toast('Photo limit set to '+v+' MB')};
   i.onkeydown=e=>{if(e.key=='Enter')sv.click()};
-  modal('Photo upload limit',E('small',0,'Largest size of one photo, in MB. Bigger photos are shrunk automatically before sending (except moving GIFs). Photos are deleted after 5 days, in channels and direct messages.'),i,st,sv);
+  const dn=E('input');dn.type='number';dn.min=1;dn.max=500;dn.step=1;dn.value=S.me.imgDaily||20;
+  const dsv=E('button','p','Save daily limit');dsv.onclick=()=>{const n=Math.round(+dn.value);if(!(n>=1&&n<=500))return st.textContent='Daily limit: 1 to 500';tx({t:'imgdaily',n});close();toast('Daily limit set to '+n+' photos per person')};
+  modal('Photo upload limit',E('small',0,'Largest size of one photo, in MB. Bigger photos are shrunk automatically before sending (except moving GIFs). Photos are deleted after 5 days, in channels and direct messages.'),i,sv,
+    E('label',0,'Photos per person per day'),E('small',0,'Counted when sent. Deleting a photo does not give it back. Resets at midnight (Philippine time).'),dn,dsv,st);
   setTimeout(()=>{i.focus();i.select()},50);
 }
+/* ---------- Music (YouTube) in voice channels ----------
+   Type in any chat box while you are in voice:  /play <YouTube link or song name>  /skip  /pause  /resume  /stop  /queue  /np
+   Everyone in the voice channel hears it at the same time. It plays in each person's own small official YouTube
+   player (YouTube requires it to be visible), NOT through anyone's microphone, so it never slows down the voice. */
+const MCMDS=[['/play','<YouTube link or song name>','Play a song (or add it to the queue)'],['/skip','','Next song'],['/pause','','Pause for everyone'],['/resume','','Continue'],['/stop','','Stop and clear the queue'],['/queue','','Show the queue'],['/np','','What is playing now']];
+function musicCommand(t){
+  const m=/^\/(\w+)\s*(.*)$/s.exec(t);if(!m)return false;
+  const c=m[1].toLowerCase(),arg=m[2].trim(),al={p:'play',s:'skip',n:'skip',next:'skip',q:'queue',nowplaying:'np',leave:'stop'};
+  const op=al[c]||c;
+  if(!['play','skip','pause','resume','stop','queue','np'].includes(op))return false;
+  if(!vc){toast('🎵 Join a voice channel first, then use /'+op);return true}
+  if(op=='queue'||op=='np'){musicInfo(op);return true}
+  tx({t:'music',op,q:arg});if(op=='play'){musicUnlock();toast('🎵 Looking up the song…')}
+  return true;
+}
+function musicInfo(op){
+  const mu=S.music;if(!mu||!mu.cur)return toast('🎵 Nothing is playing');
+  if(op=='np')return toast('🎵 Now playing: '+mu.cur.title+' (added by '+mu.cur.by+')');
+  modal('Music queue',E('b',0,'▶ '+mu.cur.title),E('small',0,'added by '+mu.cur.by),...(mu.queue.length?mu.queue.map((s,i)=>E('div',0,(i+1)+'. '+s.title+' — '+s.by)):[E('small',0,'Nothing else in the queue. Add with /play <link>')]));
+}
+let ytReady=null,ytP=null,ytCur=null,mOff=0,mVol=+(localStorage.mvol||50),mDrift=null,mNeedClick=false;
+function ytApi(){return ytReady||(ytReady=new Promise(res=>{window.onYouTubeIframeAPIReady=res;const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.append(s)}))}
+function musicUnlock(){mNeedClick=false;if(ytP&&S.music&&S.music.cur&&!S.music.cur.pausedAt)try{ytP.playVideo()}catch{}}
+function mExpected(){const c=S.music.cur;return Math.max(0,((c.pausedAt||Date.now()+mOff)-c.start)/1000)}
+async function syncMusic(){
+  const mu=vc?S.music:null;
+  if(!mu||!mu.cur){if(ytP){try{ytP.destroy()}catch{}ytP=null;ytCur=null}$('#mcard')&&$('#mcard').remove();clearInterval(mDrift);return}
+  mOff=mu.now-Date.now();
+  drawMusicCard(mu);
+  await ytApi();
+  if(!ytP){
+    ytCur=mu.cur.id;
+    await new Promise(res=>{ytP=new YT.Player('mplay',{width:200,height:200,videoId:mu.cur.id,playerVars:{autoplay:1,controls:0,disablekb:1,modestbranding:1,rel:0,playsinline:1,start:Math.floor(mExpected())},
+      events:{onReady:()=>{ytP.setVolume(mVol);applyMusic();res()},
+        onStateChange:e=>{if(e.data===YT.PlayerState.ENDED&&S.music&&S.music.cur)tx({t:'music',op:'ended',id:S.music.cur.id});
+          if(e.data===YT.PlayerState.UNSTARTED||e.data===YT.PlayerState.CUED)setTimeout(()=>{if(ytP&&ytP.getPlayerState&&ytP.getPlayerState()!==1&&S.music&&S.music.cur&&!S.music.cur.pausedAt&&mExpected()>0){mNeedClick=true;drawMusicCard(S.music)}},2500)},
+        onError:e=>{toast('🎵 This song cannot be played here, skipping');if(S.music&&S.music.cur)tx({t:'music',op:'ended',id:S.music.cur.id})}}})});
+    clearInterval(mDrift);mDrift=setInterval(()=>{   // stay in step with everyone else
+      if(!ytP||!ytP.getCurrentTime||!S.music||!S.music.cur||S.music.cur.pausedAt)return;
+      const d=ytP.getCurrentTime()-mExpected();if(Math.abs(d)>2)ytP.seekTo(mExpected(),true);
+    },8000);
+    return;
+  }
+  if(ytCur!==mu.cur.id){ytCur=mu.cur.id;ytP.loadVideoById({videoId:mu.cur.id,startSeconds:mExpected()})}
+  applyMusic();
+}
+function applyMusic(){
+  const c=S.music&&S.music.cur;if(!ytP||!c||!ytP.getPlayerState)return;
+  deaf||svd()?ytP.mute():ytP.unMute();   // deafened = no music either
+  if(c.pausedAt){ytP.pauseVideo();ytP.seekTo(mExpected(),true);return}
+  const wait=(c.start-(Date.now()+mOff));
+  if(wait>0){ytP.pauseVideo();ytP.seekTo(0,true);setTimeout(()=>{if(S.music&&S.music.cur===c)ytP.playVideo()},wait);return}
+  if(Math.abs((ytP.getCurrentTime()||0)-mExpected())>2)ytP.seekTo(mExpected(),true);
+  ytP.playVideo();
+}
+function drawMusicCard(mu){
+  let c=$('#mcard');
+  if(!c){c=E('div');c.id='mcard';const pw=E('div','mpw');const ph=E('div');ph.id='mplay';pw.append(ph);c.append(pw,E('div','minfo'));document.body.append(c)}
+  const inf=c.querySelector('.minfo');inf.replaceChildren();
+  inf.append(E('small',0,mu.cur.pausedAt?'⏸ Paused':'🎵 Now playing'),E('b',0,mu.cur.title),E('small',0,'added by '+mu.cur.by+(mu.queue.length?' • '+mu.queue.length+' in queue':'')));
+  const row=E('div','mbtn');
+  const pp=E('button',0,mu.cur.pausedAt?'▶':'⏸');pp.title=mu.cur.pausedAt?'Resume (/resume)':'Pause (/pause)';pp.onclick=()=>tx({t:'music',op:mu.cur.pausedAt?'resume':'pause'});
+  const sk=E('button',0,'⏭');sk.title='Skip (/skip)';sk.onclick=()=>tx({t:'music',op:'skip'});
+  const st=E('button',0,'⏹');st.title='Stop (/stop)';st.onclick=()=>confirm('Stop the music for everyone?')&&tx({t:'music',op:'stop'});
+  const ql=E('button',0,'☰');ql.title='Queue (/queue)';ql.onclick=()=>musicInfo('queue');
+  row.append(pp,sk,st,ql);
+  const vw=E('label','mvol');const v=E('input');v.type='range';v.min=0;v.max=100;v.value=mVol;v.title='Music volume (only for you)';
+  v.oninput=()=>{mVol=+v.value;try{localStorage.mvol=mVol}catch{};ytP&&ytP.setVolume&&ytP.setVolume(mVol)};vw.append(E('span',0,'🔈'),v);
+  inf.append(row,vw);
+  if(mNeedClick){const b=E('button','p','▶ Click to hear the music');b.onclick=()=>{musicUnlock();drawMusicCard(S.music)};inf.append(b)}
+}
+addEventListener('pointerdown',()=>{if(mNeedClick)musicUnlock()},{capture:true});
 let unread={};   // channel id -> new messages I have not seen (from the server, plus live ones)
 function showUnread(){const n=Object.values(unread).reduce((a,b)=>a+b,0)+(typeof notifs!='undefined'?notifs.filter(x=>!x.read).length:0);document.title=(n?'('+(n>99?'99+':n)+') ':'')+appName;const nb=$('#navBtn');if(nb)nb.classList.toggle('dot',n>0)}   // phone: red dot on the ☰ button
 document.addEventListener('visibilitychange',()=>{   // came back to the tab: the open channel is now read
@@ -1083,6 +1201,7 @@ $('#send').onsubmit=e=>{
   e.preventDefault();const i=$('#txt');
   if(pend.some(p=>p.busy))return toast('Wait for the photo to finish uploading');
   const imgs=pend.map(p=>p.id);
+  if(!imgs.length&&musicCommand(i.value.trim())){i.value='';txtFit();return}   // /play, /skip … are music commands, not chat
   if(i.value.trim()||imgs.length)tx({t:'chat',ch:cur.id,text:i.value,imgs});
   i.value='';txtFit();pend=[];drawPend();
 };
@@ -1137,7 +1256,7 @@ function applyMic(){if(local)local.getAudioTracks().forEach(t=>t.enabled=!(muted
 function syncAudio(){Object.entries(auds).forEach(([k,a])=>{a.muted=audioMuted(k);a.volume=volOf(k)/100});Object.entries(rx).forEach(([k,r])=>r.g.gain.value=audioMuted(k)?0:volOf(k)/100)}
 function setVS(){applyMic();syncAudio();sendVS();render()}
 function toggleMute(){if(vc&&noMic)return toast('No microphone: you are listening only. Plug in a mic or allow it, then pick it in Audio setup.');if(svm()||svd())return toast('You were muted by a moderator');if(deaf){deaf=false;muted=false}else muted=!muted;setVS()}
-function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS()}
+function toggleDeaf(){if(svd())return toast('You were deafened by a moderator');deaf=!deaf;setVS();applyMusic()}
 let tt;function toast(t){const e=$('#toast');e.textContent=t;e.classList.remove('hide');clearTimeout(tt);tt=setTimeout(()=>e.classList.add('hide'),3500)}
 function voiceItems(u){
   const me=S.me,it=[];
@@ -1165,7 +1284,8 @@ function settings(){
     const ia=E('button',S.dl?'':'p','Install desktop app');ia.onclick=installApp;items.push(ia);
   }
   if(me.role=='admin'){const ap=E('button',0,'Appearance (background, logo, button colour)');ap.onclick=appearance;items.push(ap);
-    const pl=E('button',0,'Photo upload limit ('+imgMB()+' MB)');pl.onclick=photoLimit;items.push(pl)}
+    const pl=E('button',0,'Photo upload limit ('+imgMB()+' MB)');pl.onclick=photoLimit;items.push(pl);
+    const bk=E('button',0,'Backup & restore');bk.onclick=backupModal;items.push(bk)}
   const cp=E('button',0,'Change password');cp.onclick=passModal;items.push(cp);
   const au=E('button',0,'Audio setup (microphone, speakers, connection test)');au.onclick=audioSetup;items.push(au);
   items.push(E('label',0,'Muted for me (only you stop hearing them)'));
@@ -1372,7 +1492,7 @@ async function switchMic(){   // change microphone while in a call
   let s;try{s=await cleanMic(await navigator.mediaDevices.getUserMedia(micConstraints()))}catch(e){return micError(e)}
   const t=s.getAudioTracks()[0];
   Object.values(pcs).forEach(pc=>pc.getSenders().forEach(x=>{if(x.track&&x.track.kind=='audio')x.replaceTrack(t).catch(()=>{})}));
-  const old=local;unwatch(S.me.key);local=s;applyMic();watch(S.me.key,local);ensureCap();
+  const old=local;unwatch(S.me.key);local=s;watchMicEnd(s);applyMic();watch(S.me.key,local);ensureCap();
   stopMic(old);
 }
 async function netTest(out){
@@ -1670,6 +1790,41 @@ async function tuneLinks(){
 }
 setInterval(tuneLinks,4000);
 
+/* ---------- Audio health check (every 5 s) ----------
+   Fixes the "they can't hear me / I can't hear them" cases by itself:
+   - a connection says "connected" but no voice arrives from someone who is not muted -> it is started over;
+   - my microphone stopped sending (headset unplugged, Bluetooth switched, phone took the mic) -> it is reconnected;
+   - backup audio ("Via server") is re-announced so both sides keep using it. */
+const theyMuted=k=>{const s=(S.vs||{})[k]||{},v=(S.sv||{})[k]||{};return !!(s.m||s.d||v.m||v.d)};
+const iAmMuted=()=>muted||deaf||svm()||svd()||noMic;
+let micStuck=0,micFixing=false;
+function watchMicEnd(st){   // the microphone was unplugged / taken by another app: grab it again
+  const t=st&&(st._raw||st).getAudioTracks()[0];if(!t)return;
+  t.onended=()=>{if(local!==st||!vc||micFixing)return;micFixing=true;toast('🎤 Your microphone was disconnected. Reconnecting it…');Promise.resolve(switchMic()).catch(()=>{}).finally(()=>micFixing=false)};
+}
+async function audioHealth(){
+  if(!vc||!S)return;
+  let sentAny=false,checked=0;
+  for(const [k,pc] of Object.entries(pcs)){
+    if(relayOn.has(k)){if(Math.random()<.34)tx({t:'sig',to:k,data:{relay:1}});continue}   // keep both sides on backup audio
+    if(pc.connectionState!='connected')continue;
+    let rb=0,sb=0;
+    try{(await pc.getStats()).forEach(r=>{if(r.kind!='audio')return;if(r.type=='inbound-rtp')rb+=r.bytesReceived||0;if(r.type=='outbound-rtp')sb+=r.bytesSent||0})}catch{continue}
+    const h=pc._h||(pc._h={rb,sb,stuck:0,resets:0});
+    if(sb>h.sb)sentAny=true;checked++;
+    if(rb<=h.rb&&!theyMuted(k)&&Date.now()-(pc._born||0)>10000)h.stuck++;else h.stuck=0;   // nothing arrived from them for a while
+    h.rb=rb;h.sb=sb;
+    if(h.stuck>=3&&h.resets<3){   // ~15 s of silence on a live connection: start it over (both sides)
+      h.stuck=0;h.resets++;console.warn('voice from',k,'stopped arriving: reconnecting');
+      tx({t:'sig',to:k,data:{reset:1}});const r=h.resets;closePeer(k);if(S.me.key>k)mk(k,true);setTimeout(()=>{if(pcs[k])pcs[k]._h={rb:0,sb:0,stuck:0,resets:r}},500);
+    }
+  }
+  // my own microphone: unmuted, connected to people, but nothing sent for ~15 s -> reconnect the mic
+  if(checked&&!iAmMuted()&&!sentAny){if(++micStuck>=3&&!micFixing){micStuck=0;micFixing=true;toast('🎤 Your microphone stopped sending. Reconnecting it…');try{await switchMic()}catch{}micFixing=false}}
+  else micStuck=0;
+}
+setInterval(audioHealth,5000);
+
 /* ---------- Voice connections (WebRTC mesh, best for small groups) ---------- */
 async function joinVoice(id){
   if(joining)return;
@@ -1682,7 +1837,7 @@ async function joinVoice(id){
       st=new MediaStream();noMic=true;
       toast('No microphone available, so you joined listening only. Others cannot hear you.');
     }
-    local=st;await loadIce();
+    local=st;watchMicEnd(st);await loadIce();
     want(id);vc=id;joinedAt=Date.now();misses=0;
     applyMic();watch(S.me.key,local);tx({t:'join',ch:id});sendVS();sJoin();
     clearTimeout(rt);rt=setTimeout(reconcile,1600);
@@ -1714,7 +1869,7 @@ function syncPeers(){if(vc)Object.keys(pcs).forEach(k=>{if(!(S.voice[vc]||[]).in
 function mk(k,init){
   const pc=new RTCPeerConnection({iceServers:ICE.iceServers});pcs[k]=pc;
   // If the connection fails or drops: retry, and as a last resort send everything through the relay.
-  pc._tries=0;pc._rst=false;
+  pc._tries=0;pc._rst=false;pc._born=Date.now();
   pc._ct=setTimeout(()=>{if(pcs[k]===pc&&!['connected','completed'].includes(pcState[k]))startRelay(k)},10000);   // still not connected: use backup audio
   const heal=()=>{
     if(pcs[k]!==pc||pc._tries>=2)return;
@@ -1754,6 +1909,7 @@ function mk(k,init){
 function onSig(k,d){
   if(!local)return;
   if(d.relay)return startRelay(k,true);   // the other side switched to backup audio: do the same
+  if(d.reset){closePeer(k);if(S.me.key>k)mk(k,true);return}   // the other side found our audio stuck: start this connection over
   if(d.vq){if(pcs[k]&&VQ[d.vq]){pcs[k]._vq=d.vq;tuneVideo()}return}   // a viewer picked a quality for my screen share
   const pc=pcs[k]||mk(k,false);
   pc._q=(pc._q||Promise.resolve()).then(()=>handleSig(pc,k,d)).catch(()=>{});   // one message at a time, in order

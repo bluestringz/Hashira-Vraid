@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 const FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
 const ALL = ['channels', 'kick', 'private', 'assign', 'roles', 'voicemod', 'disconnect', 'move', 'nick', 'bracket', 'everyone'];
 const STAFF = ['channels', 'kick', 'assign', 'roles', 'voicemod', 'disconnect', 'move'];
-const BUILD = '2026-09-26-icons';   // must match BUILD in public/index.html (the page warns the admin when they differ)
+const BUILD = '2026-09-27-health';   // must match BUILD in public/index.html (the page warns the admin when they differ)
 const srv = {}; // moderator mute/deafen per user key: { m, d }. Kept in memory until removed or the server restarts.
 let db = {
   users: {}, banned: {}, sessions: {}, msgs: {},
@@ -180,6 +180,12 @@ try { fs.mkdirSync(UP_DIR, { recursive: true }); } catch {}
 const IMG_DAYS = 5, IMG_PER_MSG = 4, IMG_HARD = 50 * 1024 * 1024;   // photos in channels AND direct messages are deleted after 5 days
 const imgMaxMB = () => Number((db.settings || {}).imgMaxMB) || 2;   // set by the admin (Settings → Photo upload limit); the page shrinks bigger photos to fit
 const imgMax = () => Math.round(imgMaxMB() * 1024 * 1024) + 64 * 1024;
+// Daily photo limit per account (default 20). Counted when photos are SENT; deleting them later does not give them back.
+// The day follows Philippine time (resets at midnight PH).
+const imgDaily = () => Number((db.settings || {}).imgDaily) || 20;
+const phDay = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+const imgUsed = k => { const d = (U(k) || {}).imgDay; return d && d.d === phDay() ? d.n : 0; };
+const imgLeft = k => Math.max(0, imgDaily() - imgUsed(k));
 const IMG_EXT = /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|heic|heif|tiff?|ico)$/i;
 const upFile = id => path.join(UP_DIR, id);
 const sessionUser = req => { const k = db.sessions[(req.headers.authorization || '').replace(/^Bearer /, '')]; return k && U(k) && !db.banned[k] ? k : null; };
@@ -195,6 +201,7 @@ app.post('/api/upload', express.raw({ type: () => true, limit: IMG_HARD }), (req
   if (req.body.length > imgMax()) return res.status(413).json({ error: 'Photo is too big (max ' + imgMaxMB() + ' MB)' });
   const mine = Object.values(db.uploads || {}).filter(x => x.by === k && !x.msg && Date.now() - x.ts < 3600e3).length;
   if (mine >= 12) return res.status(429).json({ error: 'Too many pictures waiting to be sent' });
+  if (mine >= imgLeft(k)) return res.status(429).json({ error: 'Daily limit reached: ' + imgDaily() + ' photos per day. You can send more tomorrow.' });
   const id = crypto.randomBytes(12).toString('hex');
   try { fs.writeFileSync(upFile(id), req.body); } catch { return res.status(500).json({ error: 'Could not save the picture' }); }
   db.uploads = db.uploads || {};
@@ -220,6 +227,37 @@ function sweepImages() {   // every 30 minutes: photos older than 5 days are del
   save(); push();
 }
 setInterval(sweepImages, 30 * 60e3); setTimeout(sweepImages, 5000);   // also shortly after every start
+
+// ---- Backup & restore (admin): move everything to another Render service ----
+// The backup holds all accounts, roles, channels, chat, direct messages, bracket and settings, plus the
+// custom background / logo / app icons / bracket picture. Chat photos are left out (they expire in 5 days anyway).
+const THEME_KEYS = ['bg', 'logo', 'bracket', 'icon192', 'icon512'];
+app.get('/api/backup', (req, res) => {
+  if (!adminFromReq(req)) return res.sendStatus(403);
+  const files = {};
+  const t = db.theme || {};
+  THEME_KEYS.forEach(w => { if (t[w + 'Type'] && fs.existsSync(themeFile(w))) files[w] = fs.readFileSync(themeFile(w)).toString('base64'); });
+  const out = { app: 'hashira-vraid', v: 1, at: Date.now(), build: BUILD, db: { ...db, sessions: {}, uploads: {} }, files };
+  res.attachment('backup-' + new Date().toISOString().slice(0, 10) + '.json').type('application/json').send(JSON.stringify(out));
+  console.log('[backup] downloaded by admin');
+});
+app.post('/api/restore', express.raw({ type: () => true, limit: '200mb' }), async (req, res) => {
+  if (!adminFromReq(req)) return res.sendStatus(403);
+  let b;
+  try { b = JSON.parse(req.body.toString('utf8')); } catch { return res.status(400).json({ error: 'That is not a backup file' }); }
+  if (!b || b.app !== 'hashira-vraid' || !b.db || !b.db.users || !Array.isArray(b.db.channels)) return res.status(400).json({ error: 'That is not a backup file from this app' });
+  THEME_KEYS.forEach(w => { try { if (b.files && b.files[w]) fs.writeFileSync(themeFile(w), Buffer.from(b.files[w], 'base64')); else fs.unlinkSync(themeFile(w)); } catch {} });
+  const keepAdmin = db.adminEnv;
+  db = { ...b.db, sessions: {}, uploads: {} };
+  if (keepAdmin !== undefined) db.adminEnv = keepAdmin;
+  // chat photos were not in the backup: show them as expired
+  Object.values(db.msgs || {}).forEach(list => (list || []).forEach(m => (m.imgs || []).forEach(im => { im.expired = true; })));
+  seedAdmin();
+  await flush();
+  console.log('[restore] data restored from backup made', new Date(b.at).toISOString());
+  res.json({ ok: true });
+  setTimeout(() => live().forEach(x => { x.key = null; x.close(4000); }), 300);   // everyone signs in again with the restored accounts
+});
 
 app.get('/av/:k', (req, res) => {
   const u = U(req.params.k);
@@ -348,12 +386,35 @@ function setVoice(w, ch, why) {
     if (old && x.voice === old) send(x, { t: 'vev', ev: 'leave', key: w.key });
     if (ch && x.voice === ch) send(x, { t: 'vev', ev: 'join', key: w.key });
   });
+  if (old && !live().some(x => x.voice === old) && !Object.values(ghosts).some(g => g.ch === old)) delete music[old];   // everyone left: the music stops
 }
+
+// A phone that is minimised (or a connection that blips) loses its socket for a while. Instead of leaving the
+// voice channel right away, the person stays in it for up to 60 s; when their app reconnects it quietly resumes
+// ("join" with resume) — nobody hears a leave/join and the voice keeps going.
+const ghosts = {};   // key -> { ch, m, d, t }
+const GHOST_MS = 60000;
+function ghostVoice(w, why) {
+  const k = w.key, ch = w.voice;
+  if (!k || !ch) return;
+  w.voice = null;   // no leave event yet
+  if (ghosts[k]) clearTimeout(ghosts[k].t);
+  ghosts[k] = { ch, m: !!w.m, d: !!w.d, t: setTimeout(() => {
+    if (!ghosts[k] || ghosts[k].ch !== ch) return;
+    delete ghosts[k];
+    console.log('[voice]', new Date().toISOString(), k, 'left', ch, '-', why, '(did not come back within 60 s)');
+    live().forEach(x => { if (x.voice === ch) send(x, { t: 'vev', ev: 'leave', key: k }); });
+    if (!live().some(x => x.voice === ch) && !Object.values(ghosts).some(g => g.ch === ch)) delete music[ch];
+    push();
+  }, GHOST_MS) };
+  console.log('[voice]', new Date().toISOString(), k, 'lost connection in', ch, '-', why, '- keeping their place for 60 s');
+}
+const clearGhost = k => { if (ghosts[k]) { clearTimeout(ghosts[k].t); delete ghosts[k]; } };
 
 // One session per account: sign out every other socket of this user (code 4004 = logged in elsewhere).
 function dropSockets(k) {
   const old = live().filter(x => x.key === k);
-  old.forEach(x => { setVoice(x, null, 'signed in somewhere else'); x.key = null; x.close(4004); });
+  old.forEach(x => { if (x.voice) ghostVoice(x, 'reconnected'); x.key = null; x.close(4004); });   // usually the same phone coming back
   if (old.length) push();
 }
 
@@ -364,7 +425,11 @@ function push() {
     if (!w.voice) return;
     (voice[w.voice] = voice[w.voice] || []).push(w.key);
     if (w.m || w.d || w.cam || w.scr) vs[w.key] = { m: !!w.m, d: !!w.d, cam: w.cam || null, scr: w.scr || null };
-  });
+  });  for (const [k, g] of Object.entries(ghosts)) {   // people who are reconnecting still show in their voice channel
+    if (!U(k) || (voice[g.ch] || []).includes(k)) continue;
+    (voice[g.ch] = voice[g.ch] || []).push(k); if (g.m || g.d) vs[k] = { m: g.m, d: g.d, cam: null, scr: null };
+  }
+
   const users = Object.entries(db.users).map(([key, u]) => ({
     key, name: u.name, role: primary(key), roles: u.roles, av: u.av || 0, banned: !!db.banned[key], on: live().some(w => w.key === key)
   }));
@@ -372,7 +437,7 @@ function push() {
   live().forEach(w => {
     try {
       send(w, {
-        t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {}, notifs: db.users[w.key].notifs || [] },
+        t: 'state', me: { key: w.key, role: primary(w.key), roles: db.users[w.key].roles, perms: P(w.key), sv: srv[w.key] || {}, notifs: db.users[w.key].notifs || [], imgLeft: imgLeft(w.key), imgDaily: imgDaily() }, music: w.voice ? musicOut(w.voice) : null,
         roles, users, voice, vs, sv: srv, cats: db.cats, channels: db.channels.filter(c => can(w.key, c)), unread: unreadFor(w.key), dms: dmsFor(w.key), dl: process.env.DESKTOP_APP_URL || '', build: BUILD, imgMax: imgMaxMB(), bk: seeBk(w.key) ? db.bk : null, theme: themeOut()
       });
     } catch (e) { console.error('[push] state for', w.key, 'failed:', e); }   // one bad account must never stop everyone else's update
@@ -394,7 +459,8 @@ wss.on('connection', (w, req) => {
     try {
       const k = w.key;
       if (!k) return;
-      setVoice(w, null, 'connection closed (' + code + ')');
+      if (code >= 4000 || code === 1000) setVoice(w, null, 'connection closed (' + code + ')');   // closed on purpose
+      else ghostVoice(w, 'connection closed (' + code + ')');   // dropped: may come back
       w.key = null;
       console.log('[ws] closed', k, code);
       push();
@@ -515,6 +581,63 @@ function mentionsIn(text, from, c) {
   return out.slice(0, 20);
 }
 
+// ---- Music in voice channels (YouTube, played by each listener's own official YouTube player) ----
+// Commands in any chat box while in voice: /play <link or song name>, /skip, /pause, /resume, /stop, /queue, /np
+const music = {};   // voice channel id -> { cur: {id,title,by,start,pausedAt}, queue: [...] }  (not saved: stops on restart)
+const ytId = s => {
+  s = String(s || '').trim();
+  const m = /(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|music\.youtube\.com\/watch\?(?:.*&)?v=)([\w-]{11})/i.exec(s);
+  return m ? m[1] : (/^[\w-]{11}$/.test(s) ? s : null);
+};
+async function ytLookup(q) {   // a link -> {id,title}; words -> first search result (needs YT_API_KEY in Render)
+  const id = ytId(q);
+  if (id) {
+    let title = 'YouTube ' + id;
+    try { const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id), { signal: AbortSignal.timeout(5000) }); if (r.ok) title = (await r.json()).title || title; else if (r.status === 401 || r.status === 403) return { error: 'That video cannot be played here (the owner turned off embedding)' }; else if (r.status === 404) return { error: 'Video not found' }; } catch {}
+    return { id, title };
+  }
+  if (!process.env.YT_API_KEY) return { error: 'Paste a YouTube link, e.g. /play https://youtu.be/...' };
+  try {
+    const r = await fetch('https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=1&q=' + encodeURIComponent(q) + '&key=' + process.env.YT_API_KEY, { signal: AbortSignal.timeout(6000) });
+    const it = r.ok && ((await r.json()).items || [])[0];
+    if (!it) return { error: 'No song found for "' + q + '"' };
+    return { id: it.id.videoId, title: it.snippet.title.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&') };
+  } catch { return { error: 'Search is not available right now' }; }
+}
+const musicOut = ch => { const mu = music[ch]; return mu && (mu.cur || mu.queue.length) ? { cur: mu.cur, queue: mu.queue.slice(0, 20), now: Date.now() } : null; };
+function musicSay(ch, text) { live().filter(x => x.voice === ch).forEach(x => send(x, { t: 'mtoast', text })); }
+function musicNext(ch) {
+  const mu = music[ch]; if (!mu) return;
+  const nx = mu.queue.shift();
+  mu.cur = nx ? { ...nx, start: Date.now() + 1500, pausedAt: null } : null;   // small head start so everyone begins together
+  if (!mu.cur && !mu.queue.length) delete music[ch];
+  push();
+}
+async function musicCmd(w, m) {
+  const k = w.key, ch = w.voice, u = U(k);
+  if (!ch) return send(w, { t: 'mtoast', text: '🎵 Join a voice channel first' });
+  const mu = music[ch] || (music[ch] = { cur: null, queue: [] });
+  const op = String(m.op || '');
+  if (op === 'play') {
+    const q = String(m.q || '').trim().slice(0, 200);
+    if (!q) return send(w, { t: 'mtoast', text: '🎵 Usage: /play <YouTube link or song name>' });
+    if (mu.queue.length >= 50) return send(w, { t: 'mtoast', text: '🎵 The queue is full (50 songs)' });
+    const r = await ytLookup(q);
+    if (r.error) return send(w, { t: 'mtoast', text: '🎵 ' + r.error });
+    if (!music[ch] || w.voice !== ch) return;
+    const song = { id: r.id, title: r.title.slice(0, 120), by: u.name };
+    if (!mu.cur) { mu.cur = { ...song, start: Date.now() + 1500, pausedAt: null }; musicSay(ch, '🎵 ' + u.name + ' played: ' + song.title); }
+    else { mu.queue.push(song); musicSay(ch, '🎵 ' + u.name + ' added to queue (#' + mu.queue.length + '): ' + song.title); }
+    return push();
+  }
+  if (!mu.cur) { if (!mu.queue.length) delete music[ch]; return send(w, { t: 'mtoast', text: '🎵 Nothing is playing' }); }
+  if (op === 'ended') { if (m.id === mu.cur.id && !mu.cur.pausedAt && Date.now() - mu.cur.start > 3000) musicNext(ch); return; }   // a listener's player finished the song
+  if (op === 'skip') { musicSay(ch, '⏭ ' + u.name + ' skipped: ' + mu.cur.title); return musicNext(ch); }
+  if (op === 'stop') { delete music[ch]; musicSay(ch, '⏹ ' + u.name + ' stopped the music'); return push(); }
+  if (op === 'pause' && !mu.cur.pausedAt) { mu.cur.pausedAt = Date.now(); musicSay(ch, '⏸ Paused by ' + u.name); return push(); }
+  if (op === 'resume' && mu.cur.pausedAt) { mu.cur.start += Date.now() - mu.cur.pausedAt; mu.cur.pausedAt = null; musicSay(ch, '▶ Resumed by ' + u.name); return push(); }
+}
+
 function handle(w, m) {
   const k = w.key, u = db.users[k], adm = isAdm(k), has = p => P(k).includes(p), canBk = adm || has('bracket');
   const okTarget = t => t && t !== k && U(t) && !isAdm(t) && (adm || !P(t).some(p => STAFF.includes(p)));
@@ -525,10 +648,10 @@ function handle(w, m) {
     case 'dmhide': { const c = chan(m.ch); if (c && c.dm && c.dm.includes(k)) { (u.dmHide || (u.dmHide = {}))[c.id] = Date.now(); save(); push(); } break; }   // remove a conversation from my list (comes back on a new message)   // saw new messages while the channel was open
     case 'chat': {
       const c = chan(m.ch), text = String(m.text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
-      const imgs = c && c.photos ? (Array.isArray(m.imgs) ? m.imgs : []).map(String).filter(id => { const x = (db.uploads || {})[id]; return x && x.by === k && x.ch === c.id && !x.msg; }).slice(0, IMG_PER_MSG) : [];
+      const imgs = c && c.photos ? (Array.isArray(m.imgs) ? m.imgs : []).map(String).filter(id => { const x = (db.uploads || {})[id]; return x && x.by === k && x.ch === c.id && !x.msg; }).slice(0, Math.min(IMG_PER_MSG, imgLeft(k))) : [];
       if (!can(k, c) || (!text && !imgs.length)) break;
       const msg = { id: crypto.randomBytes(4).toString('hex'), key: k, name: u.name, text, ts: Date.now() };
-      if (imgs.length) { msg.imgs = imgs.map(id => ({ id, type: db.uploads[id].type, name: db.uploads[id].name })); imgs.forEach(id => { db.uploads[id].msg = msg.id; }); }
+      if (imgs.length) { msg.imgs = imgs.map(id => ({ id, type: db.uploads[id].type, name: db.uploads[id].name })); imgs.forEach(id => { db.uploads[id].msg = msg.id; }); u.imgDay = { d: phDay(), n: imgUsed(k) + imgs.length }; }
       let men = mentionsIn(text, k, c);
       const all = /(^|\s)@everyone(?![a-z0-9_])/i.test(text) && (adm || has('everyone'));   // @everyone: admin / Senior (the "everyone" permission)
       if (all) { msg.all = true; men = Object.keys(db.users).filter(x => x !== k && !db.banned[x] && can(x, c)); }
@@ -541,23 +664,31 @@ function handle(w, m) {
       });
       save();
       live().forEach(x => can(x.key, c) && send(x, { t: 'chat', ch: c.id, msg }));
+      if (msg.imgs) live().filter(x => x.key === k).forEach(x => send(x, { t: 'imgleft', n: imgLeft(k), of: imgDaily() }));   // my photos left today
       break;
     }
     case 'join': {
       const c = chan(m.ch);
       if (!can(k, c) || c.type !== 'voice') return send(w, { t: 'denied' });
+      if (m.resume && ghosts[k] && ghosts[k].ch === c.id) {   // came back in time: quietly continue
+        clearGhost(k); w.voice = c.id;
+        console.log('[voice]', new Date().toISOString(), k, 'reconnected to', c.id);
+        send(w, { t: 'resumed' }); push(); break;
+      }
+      clearGhost(k);
       setVoice(w, c.id);
       send(w, { t: 'peers', peers: live().filter(x => x !== w && x.voice === c.id).map(x => x.key) });
       push(); break;
     }
     case 'ping': break;   // client keep-alive
+    case 'music': musicCmd(w, m).catch(e => console.error('[music]', e)); break;
     case 'notifread': {   // mark my notifications read (one, or all)
       (u.notifs || []).forEach(n => { if (m.all || n.id === m.id) n.read = true; });
       if (m.clear) u.notifs = [];
       save(); send(w, { t: 'notifs', list: u.notifs || [] }); break;
     }
     case 'rset': w.rset = new Set((Array.isArray(m.to) ? m.to : []).slice(0, 30).map(String)); break;   // who gets my backup audio
-    case 'leave': setVoice(w, null, 'left by request'); push(); break;
+    case 'leave': clearGhost(k); setVoice(w, null, 'left by request'); push(); break;
     case 'sig': { const p = live().find(x => x.key === m.to && x.voice && x.voice === w.voice); p && send(p, { t: 'sig', from: k, data: m.data }); break; }
     case 'vs':
       w.m = !!m.m; w.d = !!m.d;
@@ -588,6 +719,11 @@ function handle(w, m) {
       const roles = cleanRoles(m.roles);
       db.channels.push({ id: crypto.randomBytes(4).toString('hex'), name, type: m.type === 'voice' ? 'voice' : 'text', open: !roles.length && !!m.open, roles, cat: db.cats.some(x => x.id === m.cat) ? m.cat : '' });
       done(); break;
+    }
+    case 'imgdaily': {   // admin: photos each account may send per day (1 - 500)
+      const n = Math.round(Number(m.n));
+      if (!adm || !(n >= 1 && n <= 500)) break;
+      db.settings = db.settings || {}; db.settings.imgDaily = n; done(); break;
     }
     case 'imgmax': {   // admin: largest photo size in MB (0.5 - 25)
       const mb = Math.round(Number(m.mb) * 10) / 10;
